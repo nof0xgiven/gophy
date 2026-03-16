@@ -21,7 +21,7 @@ struct ModeControllerTests {
             modelRegistry: mockRegistry
         )
 
-        var stateHistory: [ModeState] = []
+        let stateHistory = SendableBox<ModeState>()
         let stateTask = Task {
             for await state in controller.stateStream {
                 stateHistory.append(state)
@@ -46,8 +46,8 @@ struct ModeControllerTests {
         #expect(controller.isReady)
         #expect(controller.currentMode == .meeting)
 
-        #expect(stateHistory.contains(.loading))
-        #expect(stateHistory.contains(.ready))
+        #expect(stateHistory.values.contains(.loading))
+        #expect(stateHistory.values.contains(.ready))
     }
 
     @Test("Document mode loads Qwen2.5-VL and nomic-embed")
@@ -66,7 +66,7 @@ struct ModeControllerTests {
             modelRegistry: mockRegistry
         )
 
-        var stateHistory: [ModeState] = []
+        let stateHistory = SendableBox<ModeState>()
         let stateTask = Task {
             for await state in controller.stateStream {
                 stateHistory.append(state)
@@ -91,8 +91,8 @@ struct ModeControllerTests {
         #expect(controller.isReady)
         #expect(controller.currentMode == .document)
 
-        #expect(stateHistory.contains(.loading))
-        #expect(stateHistory.contains(.ready))
+        #expect(stateHistory.values.contains(.loading))
+        #expect(stateHistory.values.contains(.ready))
     }
 
     @Test("Mode switch unloads previous mode engines and loads new ones")
@@ -122,7 +122,7 @@ struct ModeControllerTests {
         mockTranscription.loadCalled = false
         mockTextGen.loadCalled = false
 
-        var stateHistory: [ModeState] = []
+        let stateHistory = SendableBox<ModeState>()
         let stateTask = Task {
             for await state in controller.stateStream {
                 stateHistory.append(state)
@@ -145,8 +145,8 @@ struct ModeControllerTests {
         #expect(ocrLoadCalled4)
         #expect(controller.currentMode == .document)
 
-        #expect(stateHistory.contains(.switching))
-        #expect(stateHistory.contains(.ready))
+        #expect(stateHistory.values.contains(.switching))
+        #expect(stateHistory.values.contains(.ready))
     }
 
     @Test("State stream emits loading -> ready -> switching -> ready")
@@ -165,7 +165,7 @@ struct ModeControllerTests {
             modelRegistry: mockRegistry
         )
 
-        var stateHistory: [ModeState] = []
+        let stateHistory = SendableBox<ModeState>()
         let stateTask = Task {
             for await state in controller.stateStream {
                 stateHistory.append(state)
@@ -185,11 +185,12 @@ struct ModeControllerTests {
 
         stateTask.cancel()
 
-        #expect(stateHistory.count >= 4)
+        let states = stateHistory.values
+        #expect(states.count >= 4)
 
         var hasLoadingToReady = false
-        for i in 0..<stateHistory.count-1 {
-            if stateHistory[i] == .loading && stateHistory[i+1] == .ready {
+        for i in 0..<states.count-1 {
+            if states[i] == .loading && states[i+1] == .ready {
                 hasLoadingToReady = true
                 break
             }
@@ -197,8 +198,8 @@ struct ModeControllerTests {
         #expect(hasLoadingToReady)
 
         var hasSwitchingToReady = false
-        for i in 0..<stateHistory.count-1 {
-            if stateHistory[i] == .switching && stateHistory[i+1] == .ready {
+        for i in 0..<states.count-1 {
+            if states[i] == .switching && states[i+1] == .ready {
                 hasSwitchingToReady = true
                 break
             }

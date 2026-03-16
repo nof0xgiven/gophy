@@ -56,7 +56,7 @@ if [ -d ".build/xcode/Build/Products/Debug/mlx-swift_Cmlx.bundle" ]; then
     echo "Copied MLX Metal library bundle"
 fi
 
-# Sign the app
-codesign --force --deep --sign - "$APP_DIR"
+# Sign the app with entitlements (sandbox disabled for ad-hoc signing, enables Keychain access)
+codesign --force --deep --sign - --entitlements Sources/Gophy/Gophy-debug.entitlements "$APP_DIR"
 
 echo "Build complete: $APP_DIR"

@@ -78,6 +78,18 @@ public final class SettingsViewModel {
     var configuredProviderIds: Set<String> = []
     var providerErrorMessage: String?
 
+    // Observable per-capability provider/model selections (mirrors UserDefaults for UI reactivity)
+    var selectedTextGenProviderId: String = "local"
+    var selectedTextGenCloudModelId: String = ""
+    var selectedEmbeddingProviderId: String = "local"
+    var selectedEmbeddingCloudModelId: String = ""
+    var selectedSTTProviderId: String = "local"
+    var selectedSTTCloudModelId: String = ""
+    var selectedVisionProviderId: String = "local"
+    var selectedVisionCloudModelId: String = ""
+    var selectedTTSProviderId: String = "local"
+    var selectedTTSCloudModelId: String = ""
+
     // Calendar settings
     var isGoogleSignedIn: Bool = false
     var googleUserEmail: String?
@@ -186,6 +198,18 @@ public final class SettingsViewModel {
         if ocrMaxTokensValue > 0 {
             ocrMaxTokens = Double(ocrMaxTokensValue)
         }
+
+        // Load per-capability provider selections
+        selectedTextGenProviderId = defaults.string(forKey: "selectedTextGenProvider") ?? "local"
+        selectedTextGenCloudModelId = defaults.string(forKey: "selectedTextGenModel") ?? ""
+        selectedEmbeddingProviderId = defaults.string(forKey: "selectedEmbeddingProvider") ?? "local"
+        selectedEmbeddingCloudModelId = defaults.string(forKey: "selectedEmbeddingModel") ?? ""
+        selectedSTTProviderId = defaults.string(forKey: "selectedSTTProvider") ?? "local"
+        selectedSTTCloudModelId = defaults.string(forKey: "selectedSTTModel") ?? ""
+        selectedVisionProviderId = defaults.string(forKey: "selectedVisionProvider") ?? "local"
+        selectedVisionCloudModelId = defaults.string(forKey: "selectedVisionModel") ?? ""
+        selectedTTSProviderId = defaults.string(forKey: "selectedTTSProvider") ?? "local"
+        selectedTTSCloudModelId = defaults.string(forKey: "selectedTTSModel") ?? ""
     }
 
     private func startDeviceListener() {
@@ -653,16 +677,26 @@ public final class SettingsViewModel {
         if let registry = providerRegistry {
             return registry.selectedProviderId(for: capability)
         }
-        let (providerKey, _) = defaultsKeys(for: capability)
-        return UserDefaults.standard.string(forKey: providerKey) ?? "local"
+        switch capability {
+        case .textGeneration: return selectedTextGenProviderId
+        case .embedding: return selectedEmbeddingProviderId
+        case .speechToText: return selectedSTTProviderId
+        case .vision: return selectedVisionProviderId
+        case .textToSpeech: return selectedTTSProviderId
+        }
     }
 
     func selectedModelIdFor(_ capability: ProviderCapability) -> String {
         if let registry = providerRegistry {
             return registry.selectedModelId(for: capability)
         }
-        let (_, modelKey) = defaultsKeys(for: capability)
-        return UserDefaults.standard.string(forKey: modelKey) ?? ""
+        switch capability {
+        case .textGeneration: return selectedTextGenCloudModelId
+        case .embedding: return selectedEmbeddingCloudModelId
+        case .speechToText: return selectedSTTCloudModelId
+        case .vision: return selectedVisionCloudModelId
+        case .textToSpeech: return selectedTTSCloudModelId
+        }
     }
 
     func availableCloudModels(for capability: ProviderCapability, providerId: String) -> [CloudModelDefinition] {
@@ -680,6 +714,25 @@ public final class SettingsViewModel {
             let (providerKey, modelKey) = defaultsKeys(for: capability)
             UserDefaults.standard.set(providerId, forKey: providerKey)
             UserDefaults.standard.set(modelId, forKey: modelKey)
+        }
+
+        // Update observable properties so SwiftUI re-renders
+        switch capability {
+        case .textGeneration:
+            selectedTextGenProviderId = providerId
+            selectedTextGenCloudModelId = modelId
+        case .embedding:
+            selectedEmbeddingProviderId = providerId
+            selectedEmbeddingCloudModelId = modelId
+        case .speechToText:
+            selectedSTTProviderId = providerId
+            selectedSTTCloudModelId = modelId
+        case .vision:
+            selectedVisionProviderId = providerId
+            selectedVisionCloudModelId = modelId
+        case .textToSpeech:
+            selectedTTSProviderId = providerId
+            selectedTTSCloudModelId = modelId
         }
     }
 
@@ -754,14 +807,17 @@ public final class SettingsViewModel {
             return .unavailable("Unknown provider: \(providerId)")
         }
 
-        let firstTextModel = config.availableModels.first { $0.capability == .textGeneration }?.id
+        // Use a direct HTTP health check to avoid OpenAI SDK decoding issues with non-OpenAI providers
+        if let textModel = config.availableModels.first(where: { $0.capability == .textGeneration })?.id {
+            return await directHealthCheck(baseURL: config.baseURL, apiKey: apiKey, model: textModel)
+        }
+
         let firstEmbModel = config.availableModels.first { $0.capability == .embedding }?.id
 
         let provider = OpenAICompatibleProvider(
             providerId: config.id,
             baseURL: config.baseURL,
             apiKey: apiKey,
-            textGenModel: firstTextModel,
             embeddingModel: firstEmbModel
         )
         return await provider.healthCheck()
@@ -769,5 +825,44 @@ public final class SettingsViewModel {
 
     func isCloudProvider(for capability: ProviderCapability) -> Bool {
         return selectedProviderIdFor(capability) != "local"
+    }
+
+    /// Direct HTTP health check that doesn't rely on the OpenAI SDK's strict JSON decoding.
+    /// Some providers (e.g. Cerebras) return responses with extra/different fields that the SDK can't parse.
+    private func directHealthCheck(baseURL: URL, apiKey: String, model: String) async -> ProviderHealthStatus {
+        let url = baseURL.appendingPathComponent("chat/completions")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [["role": "user", "content": "ping"]],
+            "max_completion_tokens": 1
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .unavailable("Invalid response")
+            }
+
+            switch httpResponse.statusCode {
+            case 200...299:
+                return .healthy
+            case 401:
+                return .unavailable("Invalid API key")
+            case 429:
+                return .degraded("Rate limited")
+            default:
+                let bodyStr = String(data: data, encoding: .utf8) ?? "Unknown error"
+                return .unavailable("HTTP \(httpResponse.statusCode): \(bodyStr.prefix(200))")
+            }
+        } catch {
+            return .unavailable("Network error: \(error.localizedDescription)")
+        }
     }
 }

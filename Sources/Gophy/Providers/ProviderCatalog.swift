@@ -2,7 +2,7 @@ import Foundation
 
 public enum ProviderCatalog {
     public static let all: [ProviderConfiguration] = [
-        openai, googleGemini, anthropic, groq, togetherAI,
+        openai, googleGemini, anthropic, groq, cerebras, togetherAI,
         mistralAI, deepseek, fireworksAI, openRouter
     ]
 
@@ -174,6 +174,56 @@ public enum ProviderCatalog {
         ]
     )
 
+    // MARK: - Cerebras
+
+    public static let cerebras = ProviderConfiguration(
+        id: "cerebras",
+        name: "Cerebras",
+        baseURL: URL(string: "https://api.cerebras.ai/v1")!,
+        isOpenAICompatible: true,
+        supportedCapabilities: [.textGeneration],
+        availableModels: [
+            CloudModelDefinition(
+                id: "llama-4-scout-17b-16e-instruct",
+                name: "Llama 4 Scout 17B",
+                capability: .textGeneration,
+                contextWindow: 128_000,
+                inputPricePer1MTokens: 0.20,
+                outputPricePer1MTokens: 0.60
+            ),
+            CloudModelDefinition(
+                id: "llama3.1-8b",
+                name: "Llama 3.1 8B",
+                capability: .textGeneration,
+                contextWindow: 128_000,
+                inputPricePer1MTokens: 0.10,
+                outputPricePer1MTokens: 0.10
+            ),
+            CloudModelDefinition(
+                id: "llama-3.3-70b",
+                name: "Llama 3.3 70B",
+                capability: .textGeneration,
+                contextWindow: 128_000,
+                inputPricePer1MTokens: 0.60,
+                outputPricePer1MTokens: 0.60
+            ),
+            CloudModelDefinition(
+                id: "qwen-3-32b",
+                name: "Qwen 3 32B",
+                capability: .textGeneration,
+                contextWindow: 32_768,
+                inputPricePer1MTokens: 0.30,
+                outputPricePer1MTokens: 0.60
+            ),
+            CloudModelDefinition(
+                id: "zai-glm-4.7",
+                name: "ZAI GLM 4.7",
+                capability: .textGeneration,
+                contextWindow: 128_000
+            )
+        ]
+    )
+
     // MARK: - Together AI
 
     public static let togetherAI = ProviderConfiguration(
@@ -300,6 +350,16 @@ public enum ProviderCatalog {
                 contextWindow: 200_000,
                 inputPricePer1MTokens: 3.00,
                 outputPricePer1MTokens: 15.00
+            ),
+            CloudModelDefinition(
+                id: "z-ai/glm-5-turbo",
+                name: "GLM 5 Turbo (via OpenRouter)",
+                capability: .textGeneration
+            ),
+            CloudModelDefinition(
+                id: "google/gemini-3.1-flash-lite-preview",
+                name: "Gemini 3.1 Flash Lite Preview (via OpenRouter)",
+                capability: .textGeneration
             )
         ]
     )

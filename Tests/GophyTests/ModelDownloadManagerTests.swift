@@ -65,21 +65,21 @@ final class ModelDownloadManagerTests: XCTestCase {
         let manager = downloadManager!
         let stream = manager.download(model)
 
-        var progressCount = 0
-        var sawCancelled = false
+        let progressCounter = SendableCounter()
+        let cancelledFlag = SendableFlag()
 
         let downloadTask = Task {
             for await progress in stream {
-                progressCount += 1
+                progressCounter.increment()
                 if case .cancelled = progress.status {
-                    sawCancelled = true
+                    cancelledFlag.set(true)
                     break
                 }
                 if case .completed = progress.status {
                     break
                 }
 
-                if progressCount == 2 {
+                if progressCounter.value == 2 {
                     manager.cancel(model)
                 }
             }
@@ -87,7 +87,7 @@ final class ModelDownloadManagerTests: XCTestCase {
 
         await downloadTask.value
 
-        XCTAssertTrue(sawCancelled || progressCount < 11, "Download should be cancelled or stopped early")
+        XCTAssertTrue(cancelledFlag.value || progressCounter.value < 11, "Download should be cancelled or stopped early")
     }
 
     func testAlreadyDownloadedModelReturnsImmediately() async throws {

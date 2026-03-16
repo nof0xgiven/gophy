@@ -136,7 +136,7 @@ struct ProviderRegistryTests {
 
         try registry.configureProvider(id: "openai", apiKey: "sk-test")
 
-        var receivedCapabilities: [ProviderCapability] = []
+        let receivedCapabilities = SendableBox<ProviderCapability>()
         let collectTask = Task {
             for await capability in registry.providerChangeStream {
                 receivedCapabilities.append(capability)
@@ -153,7 +153,7 @@ struct ProviderRegistryTests {
         try await Task.sleep(for: .milliseconds(100))
         collectTask.cancel()
 
-        #expect(receivedCapabilities.contains(.textGeneration))
+        #expect(receivedCapabilities.values.contains(.textGeneration))
     }
 
     // MARK: - Per-Capability Selection

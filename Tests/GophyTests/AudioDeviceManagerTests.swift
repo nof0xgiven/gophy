@@ -75,13 +75,13 @@ final class AudioDeviceManagerTests: XCTestCase {
     func testDeviceChangeStreamDeliversInitialValue() async throws {
         let expectation = XCTestExpectation(description: "Receive initial device list notification")
 
-        nonisolated(unsafe) var receivedCount = 0
+        let counter = SendableCounter()
         let localManager = self.manager!
 
         let task = Task {
             for await _ in localManager.deviceChangeStream {
-                receivedCount += 1
-                if receivedCount == 1 {
+                counter.increment()
+                if counter.value == 1 {
                     expectation.fulfill()
                     break
                 }
@@ -90,7 +90,7 @@ final class AudioDeviceManagerTests: XCTestCase {
 
         await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
-        XCTAssertEqual(receivedCount, 1)
+        XCTAssertEqual(counter.value, 1)
     }
 
     func testDeviceChangeStreamDeliversUpdateWhenDeviceChanges() async throws {
@@ -98,14 +98,14 @@ final class AudioDeviceManagerTests: XCTestCase {
             throw XCTSkip("No audio hardware available for device change testing")
         }
 
-        nonisolated(unsafe) var receivedNotifications = 0
+        let counter = SendableCounter()
         let expectation = XCTestExpectation(description: "Receive device change notification")
         let localManager = self.manager!
 
         let task = Task {
             for await _ in localManager.deviceChangeStream {
-                receivedNotifications += 1
-                if receivedNotifications == 2 {
+                counter.increment()
+                if counter.value == 2 {
                     expectation.fulfill()
                     break
                 }
@@ -118,7 +118,7 @@ final class AudioDeviceManagerTests: XCTestCase {
 
         await fulfillment(of: [expectation], timeout: 2.0)
         task.cancel()
-        XCTAssertGreaterThanOrEqual(receivedNotifications, 2)
+        XCTAssertGreaterThanOrEqual(counter.value, 2)
     }
 
     private func checkForAudioHardware() -> Bool {

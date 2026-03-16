@@ -361,11 +361,11 @@ struct EventKitServiceTests {
 
         let stream = service.observe()
 
-        var changeCount = 0
+        let counter = SendableCounter()
         let task = Task {
             for await _ in stream {
-                changeCount += 1
-                if changeCount >= 2 {
+                counter.increment()
+                if counter.value >= 2 {
                     break
                 }
             }
@@ -379,7 +379,7 @@ struct EventKitServiceTests {
 
         await task.value
 
-        #expect(changeCount == 2)
+        #expect(counter.value == 2)
     }
 
     @Test("fetchUpcomingEvents includes all event properties")
