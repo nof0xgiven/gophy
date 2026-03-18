@@ -75,6 +75,12 @@ struct MeetingView: View {
                 ttsPlaybackService: ttsPlaybackService
             )
         }
+        .task {
+            if viewModel.autoStartOnAppear {
+                viewModel.autoStartOnAppear = false
+                await viewModel.startMeeting()
+            }
+        }
         .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
             Button("OK") {
                 viewModel.errorMessage = nil

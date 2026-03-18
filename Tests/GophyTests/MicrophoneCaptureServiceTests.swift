@@ -20,10 +20,9 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
                 self.continuation = continuation
                 Task {
                     await self.setRunning(true)
-                    // Emit mock chunks
                     for chunk in await self.getMockChunks() {
                         continuation.yield(chunk)
-                        try? await Task.sleep(nanoseconds: 10_000_000) // 10ms delay
+                        try? await Task.sleep(nanoseconds: 10_000_000)
                     }
                 }
             }
@@ -46,6 +45,36 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
         private func getMockChunks() -> [AudioChunk] {
             mockChunks
         }
+    }
+
+    func testRoutingStateUsesPreferredInputDeviceWhenAvailable() {
+        let preferred = AudioDevice(id: 7, name: "USB Headset", uid: "preferred", sampleRate: 48_000, inputChannelCount: 1)
+        let fallback = AudioDevice(id: 3, name: "Built-in Mic", uid: "default", sampleRate: 48_000, inputChannelCount: 1)
+
+        let routing = MicrophoneCaptureRouting.resolve(preferredInputDeviceUID: "preferred", availableDevices: [fallback, preferred], defaultDevice: fallback)
+
+        XCTAssertEqual(routing.activeDevice.uid, "preferred")
+        XCTAssertFalse(routing.usingFallback)
+    }
+
+    func testRoutingStateFallsBackToDefaultWhenPreferredDeviceUnavailable() {
+        let fallback = AudioDevice(id: 3, name: "Built-in Mic", uid: "default", sampleRate: 48_000, inputChannelCount: 1)
+
+        let routing = MicrophoneCaptureRouting.resolve(preferredInputDeviceUID: "preferred", availableDevices: [fallback], defaultDevice: fallback)
+
+        XCTAssertEqual(routing.activeDevice.uid, "default")
+        XCTAssertTrue(routing.usingFallback)
+    }
+
+    func testRoutingStateFallsBackAfterSelectedDeviceDisappears() {
+        let preferred = AudioDevice(id: 7, name: "USB Headset", uid: "preferred", sampleRate: 48_000, inputChannelCount: 1)
+        let fallback = AudioDevice(id: 3, name: "Built-in Mic", uid: "default", sampleRate: 48_000, inputChannelCount: 1)
+        let initial = MicrophoneCaptureRouting.resolve(preferredInputDeviceUID: "preferred", availableDevices: [preferred, fallback], defaultDevice: fallback)
+
+        let rerouted = initial.reroutingAfterDeviceChange(availableDevices: [fallback], defaultDevice: fallback)
+
+        XCTAssertEqual(rerouted?.activeDevice.uid, "default")
+        XCTAssertTrue(rerouted?.usingFallback == true)
     }
 
     // MARK: - Tests

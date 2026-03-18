@@ -16,17 +16,33 @@ public final class ChatDetailViewModel {
     private let ragPipeline: RAGPipeline
     private let chatMessageRepository: ChatMessageRepository
     private let chatRepository: ChatRepository
+    private let providerRegistry: ProviderRegistry?
+
+    /// Display label for the active text generation provider and model
+    public var activeProviderLabel: String {
+        guard let registry = providerRegistry else { return "Local" }
+        let providerId = registry.selectedProviderId(for: .textGeneration)
+        if providerId == "local" {
+            let modelId = UserDefaults.standard.string(forKey: "selectedTextGenModelId") ?? "qwen2.5-7b-instruct-4bit"
+            return "Local: \(modelId)"
+        }
+        let modelId = registry.selectedModelId(for: .textGeneration)
+        let providerName = ProviderCatalog.provider(id: providerId)?.name ?? providerId
+        return "\(providerName): \(modelId)"
+    }
 
     public init(
         chat: ChatRecord,
         chatMessageRepository: ChatMessageRepository,
         chatRepository: ChatRepository,
-        ragPipeline: RAGPipeline
+        ragPipeline: RAGPipeline,
+        providerRegistry: ProviderRegistry? = nil
     ) {
         self.chat = chat
         self.chatMessageRepository = chatMessageRepository
         self.chatRepository = chatRepository
         self.ragPipeline = ragPipeline
+        self.providerRegistry = providerRegistry
     }
 
     public func loadMessages() async {

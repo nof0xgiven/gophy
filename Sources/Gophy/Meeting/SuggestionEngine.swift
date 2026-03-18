@@ -58,7 +58,8 @@ private final class TextGenProviderAdapter: TextGenerationProvider, @unchecked S
 // MARK: - SuggestionEngine
 
 public actor SuggestionEngine {
-    private let textGenProvider: any TextGenerationProvider
+    private let textGenProvider: (any TextGenerationProvider)?
+    private let providerRegistry: ProviderRegistry?
     private let vectorSearchService: any VectorSearchForSuggestion
     private let embeddingEngine: any EmbeddingProviding
     private let meetingRepository: any MeetingRepositoryProtocol
@@ -67,10 +68,47 @@ public actor SuggestionEngine {
     private let autoTriggerInterval: TimeInterval
 
     private let systemPrompt = """
-        You are an AI meeting assistant. Given the current conversation and relevant context \
-        from past meetings and documents, provide a concise, actionable suggestion. \
-        Keep your response brief and focused on the most important point.
+        You are a silent meeting research assistant. Surface useful facts — never give conversation advice.
+
+        Format (strict):
+        1. ONE sentence: the key fact, detail, or context the user needs right now.
+        2. IF a specific topic/term/function/decision is referenced that the user may not recall, \
+           add 2-3 short bullet points (- dash format) explaining what it is. Skip bullets if the \
+           topic is obvious.
+
+        Rules:
+        - Never say "consider asking", "you might want to", or "it would be helpful to".
+        - Never repeat what was just said. Only add new information.
+        - Be direct. Write like a sticky note, not a paragraph.
         """
+
+    /// Resolve the active text generation provider
+    private var activeTextGenProvider: any TextGenerationProvider {
+        if let registry = providerRegistry {
+            return registry.activeTextGenProvider()
+        }
+        return textGenProvider!
+    }
+
+    /// Initialize with a ProviderRegistry (preferred — enables dynamic provider switching)
+    public init(
+        providerRegistry: ProviderRegistry,
+        vectorSearchService: any VectorSearchForSuggestion,
+        embeddingEngine: any EmbeddingProviding,
+        meetingRepository: any MeetingRepositoryProtocol,
+        documentRepository: any DocumentRepositoryForSuggestion,
+        chatMessageRepository: any ChatMessageRepoForSuggestion,
+        autoTriggerInterval: TimeInterval = 30.0
+    ) {
+        self.providerRegistry = providerRegistry
+        self.textGenProvider = nil
+        self.vectorSearchService = vectorSearchService
+        self.embeddingEngine = embeddingEngine
+        self.meetingRepository = meetingRepository
+        self.documentRepository = documentRepository
+        self.chatMessageRepository = chatMessageRepository
+        self.autoTriggerInterval = autoTriggerInterval
+    }
 
     /// Initialize with a TextGenerationProvider directly
     public init(
@@ -83,6 +121,7 @@ public actor SuggestionEngine {
         autoTriggerInterval: TimeInterval = 30.0
     ) {
         self.textGenProvider = textGenProvider
+        self.providerRegistry = nil
         self.vectorSearchService = vectorSearchService
         self.embeddingEngine = embeddingEngine
         self.meetingRepository = meetingRepository
@@ -102,6 +141,7 @@ public actor SuggestionEngine {
         autoTriggerInterval: TimeInterval = 30.0
     ) {
         self.textGenProvider = TextGenProviderAdapter(engine: textGenerationEngine)
+        self.providerRegistry = nil
         self.vectorSearchService = vectorSearchService
         self.embeddingEngine = embeddingEngine
         self.meetingRepository = meetingRepository
@@ -184,9 +224,10 @@ public actor SuggestionEngine {
                     // Build prompt
                     let prompt = await self.buildPrompt(transcript: transcript, ragContext: ragContext)
 
-                    // Generate suggestion
+                    // Generate suggestion (resolve provider inside actor context)
+                    let provider = await self.activeTextGenProvider
                     var fullSuggestion = ""
-                    let stream = self.textGenProvider.generate(
+                    let stream = provider.generate(
                         prompt: prompt,
                         systemPrompt: self.systemPrompt,
                         maxTokens: 150,

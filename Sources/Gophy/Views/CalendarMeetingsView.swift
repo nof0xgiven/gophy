@@ -55,6 +55,11 @@ struct CalendarMeetingsView: View {
         .task {
             await initializeViewModel()
         }
+        .onChange(of: navigationCoordinator.pendingAutoStart) { _, newValue in
+            if newValue != nil {
+                activeSheet = .newMeetingForEvent
+            }
+        }
     }
 
     private func openMeeting(_ meeting: MeetingRecord) {
@@ -177,11 +182,25 @@ struct CalendarMeetingsView: View {
                         chatMessageRepository: viewModel.chatMessageRepository
                     )
                 )
-            case .newMeeting, .newMeetingForEvent:
+            case .newMeeting:
                 MeetingContainerView {
                     activeSheet = nil
                     selectedCalendarEvent = nil
                     Task { await viewModel.loadMeetings() }
+                }
+            case .newMeetingForEvent:
+                MeetingContainerView(
+                    onDismiss: {
+                        activeSheet = nil
+                        selectedCalendarEvent = nil
+                        navigationCoordinator.pendingAutoStart = nil
+                        Task { await viewModel.loadMeetings() }
+                    },
+                    autoStartTitle: navigationCoordinator.pendingAutoStart?.title,
+                    autoStartCalendarEventId: navigationCoordinator.pendingAutoStart?.calendarEventId
+                )
+                .onDisappear {
+                    navigationCoordinator.pendingAutoStart = nil
                 }
             case .linkDocument(let meeting):
                 LinkDocumentSheet(

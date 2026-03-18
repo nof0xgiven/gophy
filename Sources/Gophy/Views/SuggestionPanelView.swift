@@ -7,7 +7,7 @@ struct SuggestionPanelView: View {
     let onRefresh: () async -> Void
     var ttsPlaybackService: TTSPlaybackService?
 
-    @State private var expandedSuggestions: Set<String> = []
+    @State private var collapsedSuggestions: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -67,9 +67,9 @@ struct SuggestionPanelView: View {
                         ForEach(suggestions.reversed(), id: \.id) { suggestion in
                             SuggestionItemView(
                                 suggestion: suggestion,
-                                isExpanded: expandedSuggestions.contains(suggestion.id),
+                                isExpanded: !collapsedSuggestions.contains(suggestion.id),
                                 onToggle: {
-                                    toggleExpanded(suggestion.id)
+                                    toggleCollapsed(suggestion.id)
                                 },
                                 ttsPlaybackService: ttsPlaybackService
                             )
@@ -84,11 +84,11 @@ struct SuggestionPanelView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func toggleExpanded(_ id: String) {
-        if expandedSuggestions.contains(id) {
-            expandedSuggestions.remove(id)
+    private func toggleCollapsed(_ id: String) {
+        if collapsedSuggestions.contains(id) {
+            collapsedSuggestions.remove(id)
         } else {
-            expandedSuggestions.insert(id)
+            collapsedSuggestions.insert(id)
         }
     }
 }
@@ -148,11 +148,8 @@ struct SuggestionItemView: View {
             }
 
             if isExpanded {
-                Text(suggestion.content)
-                    .font(.callout)
-                    .foregroundStyle(.primary)
+                MarkdownTextView(text: suggestion.content, font: .callout)
                     .textSelection(.enabled)
-                    .lineLimit(nil)
             } else {
                 Text(suggestion.content)
                     .font(.callout)

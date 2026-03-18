@@ -80,7 +80,10 @@ let package = Package(
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Transformers", package: "swift-transformers"),
             ],
-            path: "Sources/MLXAudioTTS"
+            path: "Sources/MLXAudioTTS",
+            exclude: [
+                "Models/PocketTTS/README.md"
+            ]
         ),
 
         // MARK: - MLXAudioSTT

@@ -181,4 +181,50 @@ struct SettingsViewModelModelSelectionTests {
             #expect(model.type == .embedding, "All models should be embedding type")
         }
     }
+
+    @Test("System audio defaults to enabled for new users")
+    func testSystemAudioDefaultsToEnabled() async throws {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "systemAudioEnabled")
+
+        let audioManager = AudioDeviceManager()
+        let storageManager = StorageManager.shared
+        let registry = DynamicModelRegistry()
+
+        let viewModel = SettingsViewModel(
+            audioDeviceManager: audioManager,
+            storageManager: storageManager,
+            registry: registry
+        )
+
+        #expect(viewModel.systemAudioEnabled == true, "System audio should default to enabled when unset")
+
+        defaults.removeObject(forKey: "systemAudioEnabled")
+    }
+
+    @Test("Setting system audio persists explicit value")
+    func testSetSystemAudioEnabledPersistsExplicitValue() async throws {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "systemAudioEnabled")
+
+        let audioManager = AudioDeviceManager()
+        let storageManager = StorageManager.shared
+        let registry = DynamicModelRegistry()
+
+        let viewModel = SettingsViewModel(
+            audioDeviceManager: audioManager,
+            storageManager: storageManager,
+            registry: registry
+        )
+
+        viewModel.setSystemAudioEnabled(false)
+        #expect(viewModel.systemAudioEnabled == false, "ViewModel should reflect disabled system audio")
+        #expect(defaults.object(forKey: "systemAudioEnabled") as? Bool == false, "System audio setting should persist false")
+
+        viewModel.setSystemAudioEnabled(true)
+        #expect(viewModel.systemAudioEnabled == true, "ViewModel should reflect enabled system audio")
+        #expect(defaults.object(forKey: "systemAudioEnabled") as? Bool == true, "System audio setting should persist true")
+
+        defaults.removeObject(forKey: "systemAudioEnabled")
+    }
 }

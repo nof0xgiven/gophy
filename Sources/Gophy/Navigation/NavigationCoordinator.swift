@@ -3,16 +3,27 @@ import os.log
 
 private let logger = Logger(subsystem: "com.gophy.app", category: "NavigationCoordinator")
 
+struct AutoStartRequest: Equatable {
+    let title: String
+    let calendarEventId: String?
+}
+
 @MainActor
 @Observable
 final class NavigationCoordinator {
     var selectedItem: SidebarItem?
     var selectedChatId: String?
+    var pendingAutoStart: AutoStartRequest?
 
     private var chatRepository: ChatRepository?
     private var database: GophyDatabase?
 
     init() {}
+
+    func requestAutoStart(title: String, calendarEventId: String?) {
+        pendingAutoStart = AutoStartRequest(title: title, calendarEventId: calendarEventId)
+        selectedItem = .meetings
+    }
 
     func openChat(contextType: ChatContextType, contextId: String?, title: String) async {
         let repo = try? ensureChatRepository()

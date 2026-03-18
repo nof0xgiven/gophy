@@ -31,6 +31,8 @@ public actor SystemAudioCaptureService: SystemAudioCaptureProtocol {
     private var startTime: TimeInterval = 0
     private var audioConverter: AVAudioConverter?
     private var sourceFormat: AVAudioFormat?
+    private var routeState: SystemAudioRouteState?
+    private var routeListenerRegistered = false
 
     private let targetSampleRate: Double = 16000
     private let targetChannelCount: UInt32 = 1
@@ -52,9 +54,11 @@ public actor SystemAudioCaptureService: SystemAudioCaptureProtocol {
     
     public func stop() async {
         guard isRunning else { return }
-        
+
         isRunning = false
-        
+        unregisterDefaultOutputListener()
+        routeState = routeState?.stopping()
+
         // Remove IO proc
         if let ioProcID = ioProcID, let aggregateDeviceID = aggregateDeviceID {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, ioProcID)
@@ -87,62 +91,175 @@ public actor SystemAudioCaptureService: SystemAudioCaptureProtocol {
         self.startTime = CACurrentMediaTime()
 
         do {
-            // Create ProcessTap for system audio
-            let tap = try createProcessTap()
-            self.tapID = tap
-
-            // Create aggregate device with the tap
-            let aggregateDevice = try createAggregateDevice(with: tap)
-            self.aggregateDeviceID = aggregateDevice
-
-            // Detect source sample rate from the aggregate device
-            var nominalSampleRate: Float64 = 48000.0
-            var srSize = UInt32(MemoryLayout<Float64>.size)
-            var srAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyNominalSampleRate,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            AudioObjectGetPropertyData(aggregateDevice, &srAddress, 0, nil, &srSize, &nominalSampleRate)
-
-            // Create input format (interleaved stereo float32 at source rate)
-            guard let inputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: nominalSampleRate,
-                channels: 2,
-                interleaved: true
-            ) else {
-                throw SystemAudioCaptureError.formatCreationFailed
-            }
-            self.sourceFormat = inputFormat
-
-            // Create output format (non-interleaved mono float32 at 16kHz)
-            guard let outputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: targetSampleRate,
-                channels: 1,
-                interleaved: false
-            ) else {
-                throw SystemAudioCaptureError.formatCreationFailed
-            }
-
-            guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-                throw SystemAudioCaptureError.converterCreationFailed
-            }
-            self.audioConverter = converter
-
-            // Set up IO proc for audio callbacks
-            try setupIOProc(for: aggregateDevice)
-
-            // Start the device
-            try startDevice(aggregateDevice)
-
+            try rebuildCaptureGraphForCurrentDefaultOutput(initialStart: true)
         } catch {
             continuation.finish()
             isRunning = false
         }
     }
-    
+
+    private func rebuildCaptureGraphForCurrentDefaultOutput(initialStart: Bool) throws {
+        let outputDeviceUID = try currentDefaultSystemOutputUID()
+        routeState = if let existingRouteState = routeState {
+            existingRouteState.rebuilding(for: outputDeviceUID)
+        } else {
+            SystemAudioRouteState.make(defaultOutputDeviceUID: outputDeviceUID)
+        }
+
+        if !initialStart {
+            tearDownCaptureGraph()
+        }
+
+        let tap = try createProcessTap()
+        self.tapID = tap
+
+        let aggregateDevice = try createAggregateDevice(with: tap, outputDeviceUID: outputDeviceUID)
+        self.aggregateDeviceID = aggregateDevice
+
+        var nominalSampleRate: Float64 = 48000.0
+        var srSize = UInt32(MemoryLayout<Float64>.size)
+        var srAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectGetPropertyData(aggregateDevice, &srAddress, 0, nil, &srSize, &nominalSampleRate)
+
+        guard let inputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: nominalSampleRate,
+            channels: 2,
+            interleaved: true
+        ) else {
+            throw SystemAudioCaptureError.formatCreationFailed
+        }
+        self.sourceFormat = inputFormat
+
+        guard let outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: targetSampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw SystemAudioCaptureError.formatCreationFailed
+        }
+
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            throw SystemAudioCaptureError.converterCreationFailed
+        }
+        self.audioConverter = converter
+
+        try setupIOProc(for: aggregateDevice)
+        try startDevice(aggregateDevice)
+        registerDefaultOutputListenerIfNeeded()
+    }
+
+    private func tearDownCaptureGraph() {
+        if let ioProcID = ioProcID, let aggregateDeviceID = aggregateDeviceID {
+            AudioDeviceDestroyIOProcID(aggregateDeviceID, ioProcID)
+            self.ioProcID = nil
+        }
+
+        if let aggregateDeviceID = aggregateDeviceID {
+            destroyAggregateDevice(aggregateDeviceID)
+            self.aggregateDeviceID = nil
+        }
+
+        if let tapID = tapID {
+            destroyProcessTap(tapID)
+            self.tapID = nil
+        }
+    }
+
+    private func currentDefaultSystemOutputUID() throws -> String {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID = AudioDeviceID(0)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+
+        guard status == noErr, deviceID != 0 else {
+            throw SystemAudioCaptureError.defaultOutputLookupFailed(status)
+        }
+
+        var uidAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uidDataSize = UInt32(MemoryLayout<CFString>.size)
+        var uidRef: Unmanaged<CFString>?
+        let uidStatus = withUnsafeMutablePointer(to: &uidRef) { ptr in
+            AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidDataSize, ptr)
+        }
+
+        guard uidStatus == noErr, let uid = uidRef?.takeUnretainedValue() as String? else {
+            throw SystemAudioCaptureError.defaultOutputLookupFailed(uidStatus)
+        }
+
+        return uid
+    }
+
+    private func registerDefaultOutputListenerIfNeeded() {
+        guard !routeListenerRegistered else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectAddPropertyListener(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            defaultSystemOutputListenerProc,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+
+        guard status == noErr else { return }
+        routeListenerRegistered = true
+        routeState = routeState?.withListenerRegistration()
+    }
+
+    private func unregisterDefaultOutputListener() {
+        guard routeListenerRegistered else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        AudioObjectRemovePropertyListener(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            defaultSystemOutputListenerProc,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+        routeListenerRegistered = false
+    }
+
+    func handleDefaultOutputDeviceChanged() async {
+        guard isRunning else { return }
+
+        do {
+            try rebuildCaptureGraphForCurrentDefaultOutput(initialStart: false)
+        } catch {
+            await stop()
+        }
+    }
+
     // MARK: - ProcessTap Creation
     
     private func createProcessTap() throws -> AudioDeviceID {
@@ -185,12 +302,17 @@ public actor SystemAudioCaptureService: SystemAudioCaptureProtocol {
     
     // MARK: - Aggregate Device Creation
     
-    private func createAggregateDevice(with tapID: AudioDeviceID) throws -> AudioDeviceID {
+    private func createAggregateDevice(with tapID: AudioDeviceID, outputDeviceUID: String) throws -> AudioDeviceID {
+        let aggregateDeviceUID = routeState?.aggregateDeviceUID ?? SystemAudioRouteState.make(defaultOutputDeviceUID: outputDeviceUID).aggregateDeviceUID
         let aggregateDeviceDict: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Gophy System Audio Tap",
-            kAudioAggregateDeviceUIDKey: "com.gophy.system-audio-tap",
-            kAudioAggregateDeviceSubDeviceListKey: [tapID],
-            kAudioAggregateDeviceMainSubDeviceKey: tapID,
+            kAudioAggregateDeviceUIDKey: aggregateDeviceUID,
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputDeviceUID]],
+            kAudioAggregateDeviceMainSubDeviceKey: outputDeviceUID,
+            kAudioAggregateDeviceTapListKey: [[
+                kAudioSubTapUIDKey: tapID,
+                kAudioSubTapDriftCompensationKey: true
+            ]],
             kAudioAggregateDeviceIsPrivateKey: 1
         ]
         
@@ -400,6 +522,10 @@ let kCATapModeListenOnly: UInt32 = 0
 
 let kAudioHardwarePropertyCreateProcessTap: UInt32 = 0x70746170  // 'ptap'
 let kAudioHardwarePropertyDestroyProcessTap: UInt32 = 0x70746170 // 'ptap'
+let kAudioAggregateDeviceTapListKey = "tap-list"
+let kAudioSubTapUIDKey = "subtap-uid"
+let kAudioSubTapDriftCompensationKey = "drift-compensation"
+let kAudioSubDeviceUIDKey = "uid"
 
 // MARK: - Errors
 
@@ -408,8 +534,26 @@ public enum SystemAudioCaptureError: Error, Sendable {
     case aggregateDeviceCreationFailed(OSStatus)
     case ioProcCreationFailed(OSStatus)
     case deviceStartFailed(OSStatus)
+    case defaultOutputLookupFailed(OSStatus)
     case noProcID
     case unsupportedMacOSVersion
     case formatCreationFailed
     case converterCreationFailed
+}
+
+private func defaultSystemOutputListenerProc(
+    _: AudioObjectID,
+    _: UInt32,
+    _: UnsafePointer<AudioObjectPropertyAddress>,
+    clientData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    guard let clientData else {
+        return noErr
+    }
+
+    let service = Unmanaged<SystemAudioCaptureService>.fromOpaque(clientData).takeUnretainedValue()
+    Task {
+        await service.handleDefaultOutputDeviceChanged()
+    }
+    return noErr
 }

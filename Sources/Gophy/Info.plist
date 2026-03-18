@@ -18,6 +18,8 @@
     <string>14.4</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Gophy records your voice during meetings to provide real-time transcription and contextual AI suggestions.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Gophy captures system and call audio during meetings so transcripts continue when your Mac switches output devices.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

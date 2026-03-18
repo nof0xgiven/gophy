@@ -17,6 +17,7 @@ public final class MeetingViewModel {
     public var systemAudioLevel: Float = 0
     public var errorMessage: String?
     public var isGeneratingSuggestion = false
+    public var autoStartOnAppear = false
     public var selectedLanguage: AppLanguage = {
         if let saved = UserDefaults.standard.string(forKey: "languagePreference"),
            let lang = AppLanguage(rawValue: saved) {
@@ -26,6 +27,7 @@ public final class MeetingViewModel {
     }()
 
     private var eventTask: Task<Void, Never>?
+    private var suggestionTask: Task<Void, Never>?
     private var durationTimer: Timer?
     private var meetingStartTime: Date?
 
@@ -45,16 +47,25 @@ public final class MeetingViewModel {
         do {
             meetingStartTime = Date()
             startDurationTimer()
-            try await sessionController.start(title: title)
+            UserDefaults.standard.set(true, forKey: "isCurrentlyRecording")
+            try await sessionController.start(
+                title: title,
+                audioConfiguration: currentAudioConfiguration()
+            )
+            startAutoSuggestions()
         } catch {
+            UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
             errorMessage = error.localizedDescription
         }
     }
 
     public func stopMeeting() async {
         do {
+            suggestionTask?.cancel()
+            suggestionTask = nil
             try await sessionController.stop()
             stopDurationTimer()
+            UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -67,7 +78,7 @@ public final class MeetingViewModel {
 
     public func resumeMeeting() async {
         do {
-            try await sessionController.resume()
+            try await sessionController.resume(audioConfiguration: currentAudioConfiguration())
             startDurationTimer()
         } catch {
             errorMessage = error.localizedDescription
@@ -151,7 +162,60 @@ public final class MeetingViewModel {
     }
 
     private func getCurrentMeetingId() -> String? {
-        return nil
+        return sessionController.currentMeetingId
+    }
+
+    private func startAutoSuggestions() {
+        guard let meetingId = getCurrentMeetingId() else { return }
+
+        // Create a transcript stream that mirrors segments as they arrive
+        let transcriptStream = AsyncStream<TranscriptSegment> { [weak self] continuation in
+            Task { [weak self] in
+                guard let self = self else {
+                    continuation.finish()
+                    return
+                }
+                // Watch for new segments by polling the array
+                var lastCount = 0
+                while !Task.isCancelled {
+                    let currentSegments = await self.transcriptSegments
+                    if currentSegments.count > lastCount {
+                        for segment in currentSegments[lastCount...] {
+                            continuation.yield(TranscriptSegment(
+                                text: segment.text,
+                                startTime: segment.startTime,
+                                endTime: segment.endTime,
+                                speaker: segment.speaker
+                            ))
+                        }
+                        lastCount = currentSegments.count
+                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000) // Check every 0.5s
+                }
+                continuation.finish()
+            }
+        }
+
+        suggestionTask = Task { [weak self] in
+            guard let self = self else { return }
+            for await suggestion in suggestionEngine.startAutoSuggestions(
+                meetingId: meetingId,
+                transcriptStream: transcriptStream
+            ) {
+                guard !suggestion.isEmpty else { continue }
+                let message = ChatMessageRecord(
+                    id: UUID().uuidString,
+                    role: "assistant",
+                    content: suggestion,
+                    meetingId: meetingId,
+                    createdAt: Date()
+                )
+                await MainActor.run {
+                    self.suggestions.append(message)
+                    SuggestionNotificationService.shared.sendSuggestion(suggestion, meetingTitle: self.title)
+                }
+            }
+        }
     }
 
     private func loadSuggestions(meetingId: String) async {
@@ -175,5 +239,12 @@ public final class MeetingViewModel {
     private func stopDurationTimer() {
         durationTimer?.invalidate()
         durationTimer = nil
+    }
+
+    private func currentAudioConfiguration() -> AudioCaptureConfiguration {
+        AudioCaptureConfiguration(
+            preferredInputDeviceUID: UserDefaults.standard.string(forKey: "selectedAudioDeviceUID"),
+            systemAudioEnabled: UserDefaults.standard.object(forKey: "systemAudioEnabled") as? Bool ?? true
+        )
     }
 }

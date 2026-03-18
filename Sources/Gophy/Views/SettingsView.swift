@@ -98,8 +98,8 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Enable System Audio Capture", isOn: $viewModel.systemAudioEnabled)
-                    .onChange(of: viewModel.systemAudioEnabled) { _, _ in
-                        viewModel.toggleSystemAudio()
+                    .onChange(of: viewModel.systemAudioEnabled) { _, newValue in
+                        viewModel.setSystemAudioEnabled(newValue)
                     }
 
                 Text("Capture audio from apps and system sounds")

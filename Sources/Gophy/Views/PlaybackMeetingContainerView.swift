@@ -131,9 +131,9 @@ struct PlaybackMeetingContainerView: View {
                 embeddingPipeline: embeddingPipeline
             )
 
-            // Create suggestion engine
+            // Create suggestion engine (uses ProviderRegistry for dynamic provider switching)
             let suggestionEngine = SuggestionEngine(
-                textGenerationEngine: textGenerationEngine,
+                providerRegistry: providerRegistry,
                 vectorSearchService: vectorSearchService,
                 embeddingEngine: embeddingEngine,
                 meetingRepository: meetingRepo,

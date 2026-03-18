@@ -60,6 +60,34 @@ final class MeetingSessionControllerTests: XCTestCase {
         XCTAssertTrue(sysStarted)
     }
 
+    func testStartSkipsSystemAudioWhenDisabledInConfiguration() async throws {
+        let configuration = AudioCaptureConfiguration(
+            preferredInputDeviceUID: nil,
+            systemAudioEnabled: false
+        )
+
+        try await controller.start(title: "Test Meeting", audioConfiguration: configuration)
+
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        let micStarted = await mockMicrophoneCapture.isStarted
+        let sysStarted = await mockSystemAudioCapture.isStarted
+        XCTAssertTrue(micStarted)
+        XCTAssertFalse(sysStarted)
+    }
+
+    func testStartPassesPreferredInputDeviceUIDToMicrophoneCapture() async throws {
+        let configuration = AudioCaptureConfiguration(
+            preferredInputDeviceUID: "preferred-mic",
+            systemAudioEnabled: true
+        )
+
+        try await controller.start(title: "Test Meeting", audioConfiguration: configuration)
+
+        let configuredDeviceUID = await mockMicrophoneCapture.configuredDeviceUID
+        XCTAssertEqual(configuredDeviceUID, "preferred-mic")
+    }
+
     func testTranscriptSegmentsAppearInEventStream() async throws {
         let expectation = expectation(description: "Received transcript segment event")
 
@@ -358,6 +386,7 @@ actor MockEmbeddingPipeline: EmbeddingPipelineProtocol {
 actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
     private var _isStarted = false
     private var _isStopped = false
+    private var _configuredDeviceUID: String?
 
     var isStarted: Bool {
         get async { _isStarted }
@@ -365,6 +394,10 @@ actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
 
     var isStopped: Bool {
         get async { _isStopped }
+    }
+
+    var configuredDeviceUID: String? {
+        get async { _configuredDeviceUID }
     }
 
     nonisolated func start() -> AsyncStream<AudioChunk> {
@@ -377,6 +410,10 @@ actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
     func stop() async {
         _isStopped = true
         _isStarted = false
+    }
+
+    func setPreferredInputDevice(uid: String?) async {
+        _configuredDeviceUID = uid
     }
 
     private func setStarted() {

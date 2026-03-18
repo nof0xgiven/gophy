@@ -4,11 +4,13 @@ import SwiftUI
 struct GophyApp: App {
     @State private var navigationCoordinator = NavigationCoordinator()
     @State private var showOnboarding: Bool = !OnboardingViewModel.hasCompletedOnboarding()
-
     init() {
         // Install crash reporter as early as possible
         CrashReporter.shared.install()
         CrashReporter.shared.logInfo("GophyApp initializing")
+
+        // Reset recording flag on launch (crash recovery)
+        UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
     }
 
     var body: some Scene {
@@ -60,6 +62,7 @@ struct GophyApp: App {
 struct ContentView: View {
     @Bindable var navigationCoordinator: NavigationCoordinator
     @FocusState private var focusedField: String?
+    @State private var autoStartCoordinator = CalendarAutoStartCoordinator()
 
     var body: some View {
         NavigationSplitView {
@@ -89,6 +92,11 @@ struct ContentView: View {
         .environment(navigationCoordinator)
         .onAppear {
             setupKeyboardShortcuts()
+        }
+        .task {
+            SuggestionNotificationService.shared.setup()
+            SuggestionNotificationService.shared.requestPermission()
+            await autoStartCoordinator.start(navigationCoordinator: navigationCoordinator)
         }
     }
 

@@ -40,10 +40,37 @@ private final class TextGenProvidingAdapter: TextGenerationProvider, @unchecked 
 public final class RAGPipeline: Sendable {
     private let embeddingEngine: any EmbeddingProviding
     private let vectorSearchService: any VectorSearching
-    private let textGenProvider: any TextGenerationProvider
+    private let textGenProvider: (any TextGenerationProvider)?
+    private let providerRegistry: ProviderRegistry?
     private let meetingRepository: any MeetingRepositoryProtocol
     private let documentRepository: any DocumentRepositoryProtocol
     private let topK: Int
+
+    /// Resolve the active text generation provider (prefers registry for dynamic switching)
+    private var activeTextGenProvider: any TextGenerationProvider {
+        if let registry = providerRegistry {
+            return registry.activeTextGenProvider()
+        }
+        return textGenProvider ?? TextGenProvidingAdapter(engine: TextGenerationEngine())
+    }
+
+    /// Initialize with a ProviderRegistry (preferred — enables dynamic provider switching)
+    public init(
+        embeddingEngine: any EmbeddingProviding,
+        vectorSearchService: any VectorSearching,
+        providerRegistry: ProviderRegistry,
+        meetingRepository: any MeetingRepositoryProtocol,
+        documentRepository: any DocumentRepositoryProtocol,
+        topK: Int = 10
+    ) {
+        self.embeddingEngine = embeddingEngine
+        self.vectorSearchService = vectorSearchService
+        self.providerRegistry = providerRegistry
+        self.textGenProvider = nil
+        self.meetingRepository = meetingRepository
+        self.documentRepository = documentRepository
+        self.topK = topK
+    }
 
     /// Initialize with a TextGenerationProvider directly
     public init(
@@ -57,6 +84,7 @@ public final class RAGPipeline: Sendable {
         self.embeddingEngine = embeddingEngine
         self.vectorSearchService = vectorSearchService
         self.textGenProvider = textGenProvider
+        self.providerRegistry = nil
         self.meetingRepository = meetingRepository
         self.documentRepository = documentRepository
         self.topK = topK
@@ -74,6 +102,7 @@ public final class RAGPipeline: Sendable {
         self.embeddingEngine = embeddingEngine
         self.vectorSearchService = vectorSearchService
         self.textGenProvider = TextGenProvidingAdapter(engine: textGenerationEngine)
+        self.providerRegistry = nil
         self.meetingRepository = meetingRepository
         self.documentRepository = documentRepository
         self.topK = topK
@@ -106,7 +135,7 @@ public final class RAGPipeline: Sendable {
                     let maxTokens = defaults.integer(forKey: "inference.maxTokens")
                     let temperature = defaults.double(forKey: "inference.temperature")
 
-                    let responseStream = textGenProvider.generate(
+                    let responseStream = activeTextGenProvider.generate(
                         prompt: prompt,
                         systemPrompt: systemPrompt,
                         maxTokens: maxTokens > 0 ? maxTokens : 2048,

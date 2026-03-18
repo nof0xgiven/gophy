@@ -56,7 +56,15 @@ if [ -d ".build/xcode/Build/Products/Debug/mlx-swift_Cmlx.bundle" ]; then
     echo "Copied MLX Metal library bundle"
 fi
 
-# Sign the app with entitlements (sandbox disabled for ad-hoc signing, enables Keychain access)
-codesign --force --deep --sign - --entitlements Sources/Gophy/Gophy-debug.entitlements "$APP_DIR"
+# Sign the app with a stable identity so macOS remembers permissions (mic, keychain) across rebuilds.
+# Uses "Gophy Development" self-signed cert if available, falls back to ad-hoc signing.
+SIGN_IDENTITY="Gophy Dev Signing"
+if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+    codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements Sources/Gophy/Gophy-debug.entitlements "$APP_DIR"
+    echo "Signed with '$SIGN_IDENTITY' certificate (permissions persist across rebuilds)"
+else
+    codesign --force --deep --sign - --entitlements Sources/Gophy/Gophy-debug.entitlements "$APP_DIR"
+    echo "Signed ad-hoc (permissions may reset on rebuild)"
+fi
 
 echo "Build complete: $APP_DIR"

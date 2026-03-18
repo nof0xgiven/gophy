@@ -54,12 +54,16 @@ let package = Package(
             ],
             exclude: [
                 "Gophy.entitlements",
+                "Gophy-debug.entitlements",
                 "Info.plist"
             ]
         ),
         .testTarget(
             name: "GophyTests",
-            dependencies: ["Gophy"]
+            dependencies: ["Gophy"],
+            resources: [
+                .process("Resources/test-recording.wav")
+            ]
         )
     ]
 )

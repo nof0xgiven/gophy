@@ -145,7 +145,11 @@ public final class SettingsViewModel {
             }
         }
 
-        systemAudioEnabled = defaults.bool(forKey: "systemAudioEnabled")
+        if let persistedSystemAudio = defaults.object(forKey: "systemAudioEnabled") as? Bool {
+            systemAudioEnabled = persistedSystemAudio
+        } else {
+            systemAudioEnabled = true
+        }
         vadSensitivity = defaults.double(forKey: "vadSensitivity")
         if vadSensitivity == 0 {
             vadSensitivity = 0.5
@@ -241,10 +245,10 @@ public final class SettingsViewModel {
         defaults.set(device.uid, forKey: "selectedAudioDeviceUID")
     }
 
-    func toggleSystemAudio() {
-        systemAudioEnabled.toggle()
+    func setSystemAudioEnabled(_ enabled: Bool) {
+        systemAudioEnabled = enabled
         let defaults = UserDefaults.standard
-        defaults.set(systemAudioEnabled, forKey: "systemAudioEnabled")
+        defaults.set(enabled, forKey: "systemAudioEnabled")
     }
 
     func updateVADSensitivity(_ value: Double) {

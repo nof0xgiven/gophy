@@ -32,7 +32,37 @@ final class MockSystemAudioCapture: SystemAudioCaptureProtocol, @unchecked Senda
 
 @Suite("SystemAudioCaptureService Tests")
 struct SystemAudioCaptureServiceTests {
-    
+
+    @Test("route state binds to current default system output at startup")
+    func testRouteBindingUsesCurrentDefaultOutput() {
+        let route = SystemAudioRouteState.make(defaultOutputDeviceUID: "built-in-output")
+
+        #expect(route.outputDeviceUID == "built-in-output")
+        #expect(route.aggregateDeviceUID.contains("built-in-output"))
+        #expect(route.isListeningForRouteChanges == false)
+    }
+
+    @Test("route change rebuilds aggregate route for new output device")
+    func testRouteRebuildsWhenDefaultOutputChanges() {
+        let initial = SystemAudioRouteState.make(defaultOutputDeviceUID: "built-in-output")
+
+        let rebuilt = initial.rebuilding(for: "airpods-output")
+
+        #expect(rebuilt.outputDeviceUID == "airpods-output")
+        #expect(rebuilt.aggregateDeviceUID.contains("airpods-output"))
+        #expect(rebuilt.aggregateDeviceUID != initial.aggregateDeviceUID)
+    }
+
+    @Test("stopping capture disables route-change listening")
+    func testRouteStopDisablesFurtherRebuilds() {
+        let initial = SystemAudioRouteState.make(defaultOutputDeviceUID: "built-in-output")
+        let active = initial.withListenerRegistration()
+        let stopped = active.stopping()
+
+        #expect(active.isListeningForRouteChanges == true)
+        #expect(stopped.isListeningForRouteChanges == false)
+    }
+
     @Test("start() emits audio chunks via AsyncStream")
     func testStartEmitsChunks() async throws {
         let mock = MockSystemAudioCapture()

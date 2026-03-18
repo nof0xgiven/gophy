@@ -10,6 +10,8 @@ struct MeetingContainerView: View {
     @State private var initError: String?
     @State private var isInitializing = true
     let onDismiss: () -> Void
+    var autoStartTitle: String?
+    var autoStartCalendarEventId: String?
 
     var body: some View {
         Group {
@@ -163,9 +165,9 @@ struct MeetingContainerView: View {
             )
             logger.info("Created EmbeddingPipeline")
 
-            // Create suggestion engine
+            // Create suggestion engine (uses ProviderRegistry for dynamic provider switching)
             let suggestionEngine = SuggestionEngine(
-                textGenerationEngine: textGenerationEngine,
+                providerRegistry: providerRegistry,
                 vectorSearchService: vectorSearchService,
                 embeddingEngine: embeddingEngine,
                 meetingRepository: meetingRepo,
@@ -189,11 +191,18 @@ struct MeetingContainerView: View {
             self.ttsPlaybackService = TTSPlaybackService(ttsEngine: ttsEngine)
             logger.info("Created TTSPlaybackService")
 
-            viewModel = MeetingViewModel(
+            let vm = MeetingViewModel(
                 sessionController: sessionController,
                 suggestionEngine: suggestionEngine,
                 chatMessageRepository: chatRepo
             )
+
+            if let autoStartTitle {
+                vm.title = autoStartTitle
+                vm.autoStartOnAppear = true
+            }
+
+            viewModel = vm
             logger.info("Meeting initialization complete!")
         } catch {
             logger.error("Meeting initialization failed: \(error.localizedDescription, privacy: .public)")

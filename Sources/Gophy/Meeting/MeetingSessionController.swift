@@ -74,12 +74,13 @@ public actor MeetingSessionController {
     private let writebackService: (any MeetingSummaryWritebackProtocol)?
     private let automationManager: (any AutomationManaging)?
 
-    private var currentMeetingId: String?
+    public nonisolated(unsafe) var currentMeetingId: String?
     private var currentCalendarEventId: String?
     private var currentStatus: MeetingStatus = .idle
     private var eventContinuation: AsyncStream<MeetingEvent>.Continuation?
     private var transcriptionTask: Task<Void, Never>?
     private var automationTask: Task<Void, Never>?
+    private var currentAudioConfiguration = AudioCaptureConfiguration()
 
     public nonisolated let eventStream: AsyncStream<MeetingEvent>
 
@@ -133,7 +134,11 @@ public actor MeetingSessionController {
         return orphanedMeetings
     }
 
-    public func start(title: String, calendarEventId: String? = nil) async throws {
+    public func start(
+        title: String,
+        calendarEventId: String? = nil,
+        audioConfiguration: AudioCaptureConfiguration = .init()
+    ) async throws {
         logger.info("Starting meeting: \(title, privacy: .public)")
 
         guard currentStatus == .idle || currentStatus == .completed else {
@@ -141,15 +146,15 @@ public actor MeetingSessionController {
             throw MeetingSessionError.sessionAlreadyActive
         }
 
+        currentAudioConfiguration = audioConfiguration
+
         updateStatus(.starting)
         logger.info("Status: starting")
 
-        // Switch to meeting mode (loads transcription + text generation engines)
         logger.info("Switching to meeting mode...")
         try await modeController.switchMode(.meeting)
         logger.info("Meeting mode active")
 
-        // Create meeting record
         let meetingId = UUID().uuidString
         let meeting = MeetingRecord(
             id: meetingId,
@@ -167,25 +172,8 @@ public actor MeetingSessionController {
         currentCalendarEventId = calendarEventId
         logger.info("Meeting record created: \(meetingId, privacy: .public)")
 
-        // Start audio capture and create mixer with the streams
-        logger.info("Starting microphone capture...")
-        let micStream = microphoneCapture.start()
-        logger.info("Microphone capture started")
+        let mixedStream = await makeMixedAudioStream(using: audioConfiguration)
 
-        logger.info("Starting system audio capture...")
-        let systemStream = systemAudioCapture.start()
-        logger.info("System audio capture started")
-
-        // Create audio mixer with the capture streams
-        logger.info("Creating audio mixer...")
-        let audioMixer = AudioMixer(
-            microphoneStream: micStream,
-            systemAudioStream: systemStream
-        )
-        let mixedStream = audioMixer.start()
-        logger.info("Audio mixer started")
-
-        // Set language hint from user preferences
         if let savedLanguage = UserDefaults.standard.string(forKey: "languagePreference"),
            let language = AppLanguage(rawValue: savedLanguage) {
             await transcriptionPipeline.setLanguageHint(language.isoCode)
@@ -193,16 +181,13 @@ public actor MeetingSessionController {
             await transcriptionPipeline.setLanguageHint(nil)
         }
 
-        // Start transcription pipeline
         logger.info("Starting transcription pipeline...")
         let transcriptStream = transcriptionPipeline.start(mixedStream: mixedStream)
         logger.info("Transcription pipeline started")
 
-        // Create a secondary stream for automation voice triggers
         let (automationTranscriptStream, automationTranscriptContinuation) =
             AsyncStream<TranscriptSegment>.makeStream()
 
-        // Process transcript segments
         transcriptionTask = Task {
             for await segment in transcriptStream {
                 await handleTranscriptSegment(segment, meetingId: meetingId)
@@ -211,7 +196,6 @@ public actor MeetingSessionController {
             automationTranscriptContinuation.finish()
         }
 
-        // Activate automations if available
         if let automationManager {
             let automationEvents = await automationManager.activateForMeeting(
                 meetingId: meetingId,
@@ -235,23 +219,18 @@ public actor MeetingSessionController {
 
         updateStatus(.stopping)
 
-        // Deactivate automations
         automationTask?.cancel()
         automationTask = nil
         await automationManager?.deactivate()
 
-        // Stop audio capture
         await microphoneCapture.stop()
         await systemAudioCapture.stop()
 
-        // Stop transcription pipeline (flushes buffers)
         await transcriptionPipeline.stop()
 
-        // Wait for transcription task to complete
         transcriptionTask?.cancel()
         transcriptionTask = nil
 
-        // Update meeting record with endedAt and completed status
         guard let meeting = try await meetingRepository.get(id: meetingId) else {
             throw MeetingSessionError.meetingNotFound
         }
@@ -267,7 +246,6 @@ public actor MeetingSessionController {
         )
         try await meetingRepository.update(updatedMeeting)
 
-        // Index meeting for vector search (optional - skip if embedding not available)
         do {
             try await embeddingPipeline.indexMeeting(meetingId: meetingId)
             logger.info("Meeting indexed for vector search")
@@ -275,7 +253,6 @@ public actor MeetingSessionController {
             logger.warning("Skipping vector indexing: \(error.localizedDescription, privacy: .public)")
         }
 
-        // Trigger summary writeback to Google Calendar if enabled
         if UserDefaults.standard.bool(forKey: "calendarWritebackEnabled"),
            let calendarEventId = currentCalendarEventId {
             do {
@@ -293,6 +270,7 @@ public actor MeetingSessionController {
 
         currentMeetingId = nil
         currentCalendarEventId = nil
+        currentAudioConfiguration = AudioCaptureConfiguration()
         updateStatus(.completed)
         logger.info("Meeting stopped successfully")
     }
@@ -304,7 +282,6 @@ public actor MeetingSessionController {
 
         updateStatus(.paused)
 
-        // Stop audio capture without ending meeting
         await microphoneCapture.stop()
         await systemAudioCapture.stop()
     }
@@ -314,7 +291,7 @@ public actor MeetingSessionController {
         logger.info("Transcription language changed to: \(language.displayName, privacy: .public)")
     }
 
-    public func resume() async throws {
+    public func resume(audioConfiguration: AudioCaptureConfiguration? = nil) async throws {
         guard currentStatus == .paused else {
             throw MeetingSessionError.sessionNotPaused
         }
@@ -323,19 +300,11 @@ public actor MeetingSessionController {
             throw MeetingSessionError.noActiveSession
         }
 
-        // Restart audio capture
-        let micStream = microphoneCapture.start()
-        let systemStream = systemAudioCapture.start()
-
-        // Create new mixer and restart transcription
-        let audioMixer = AudioMixer(
-            microphoneStream: micStream,
-            systemAudioStream: systemStream
-        )
-        let mixedStream = audioMixer.start()
+        let configuration = audioConfiguration ?? currentAudioConfiguration
+        currentAudioConfiguration = configuration
+        let mixedStream = await makeMixedAudioStream(using: configuration)
         let transcriptStream = transcriptionPipeline.start(mixedStream: mixedStream)
 
-        // Resume processing transcript segments
         transcriptionTask = Task {
             for await segment in transcriptStream {
                 await handleTranscriptSegment(segment, meetingId: meetingId)
@@ -345,11 +314,37 @@ public actor MeetingSessionController {
         updateStatus(.active)
     }
 
+    private func makeMixedAudioStream(using configuration: AudioCaptureConfiguration) async -> AsyncStream<LabeledAudioChunk> {
+        logger.info("Starting microphone capture...")
+        await microphoneCapture.setPreferredInputDevice(uid: configuration.preferredInputDeviceUID)
+        let micStream = microphoneCapture.start()
+        logger.info("Microphone capture started")
+
+        let systemStream: AsyncStream<AudioChunk>
+        if configuration.systemAudioEnabled {
+            logger.info("Starting system audio capture...")
+            systemStream = systemAudioCapture.start()
+            logger.info("System audio capture started")
+        } else {
+            logger.info("System audio capture disabled by configuration")
+            systemStream = AsyncStream { continuation in
+                continuation.finish()
+            }
+        }
+
+        logger.info("Creating audio mixer...")
+        let audioMixer = AudioMixer(
+            microphoneStream: micStream,
+            systemAudioStream: systemStream
+        )
+        let mixedStream = audioMixer.start()
+        logger.info("Audio mixer started")
+        return mixedStream
+    }
+
     private func handleTranscriptSegment(_ segment: TranscriptSegment, meetingId: String) async {
-        // Emit event
         eventContinuation?.yield(.transcriptSegment(segment))
 
-        // Persist to database
         let segmentRecord = TranscriptSegmentRecord(
             id: UUID().uuidString,
             meetingId: meetingId,

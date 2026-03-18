@@ -51,7 +51,7 @@ struct ChatMessageBubble: View {
             }
 
             if !parsed.response.isEmpty {
-                Text(renderMarkdown(parsed.response))
+                MarkdownTextView(text: parsed.response)
                     .textSelection(.enabled)
                     .padding(12)
             } else if parsed.thinking != nil {

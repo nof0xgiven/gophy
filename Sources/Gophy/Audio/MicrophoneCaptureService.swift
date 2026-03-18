@@ -1,4 +1,6 @@
 import AVFoundation
+import CoreAudio
+import AudioToolbox
 import Foundation
 import os.log
 
@@ -15,18 +17,29 @@ protocol AudioCaptureProtocol: Actor {
 public protocol MicrophoneCaptureProtocol: Sendable {
     nonisolated func start() -> AsyncStream<AudioChunk>
     func stop() async
+    func setPreferredInputDevice(uid: String?) async
 }
 
 /// Microphone capture service using AVAudioEngine
 public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCaptureProtocol {
     private let audioEngine = AVAudioEngine()
+    private let audioDeviceManager: AudioDeviceManager
     private var continuation: AsyncStream<AudioChunk>.Continuation?
     private var audioConverter: AVAudioConverter?
     private var buffer: [Float] = []
     private let targetSampleRate: Double = 16000.0
     private let chunkSize = 16000 // 1 second at 16kHz
+    private var preferredInputDeviceUID: String?
+    private var activeRouting: MicrophoneCaptureRouting?
+    private var deviceListenerTask: Task<Void, Never>?
 
-    public init() {}
+    public init() {
+        self.audioDeviceManager = AudioDeviceManager()
+    }
+
+    init(audioDeviceManager: AudioDeviceManager) {
+        self.audioDeviceManager = audioDeviceManager
+    }
 
     /// Start capturing audio from the microphone
     public nonisolated func start() -> AsyncStream<AudioChunk> {
@@ -41,8 +54,10 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
             Task {
                 do {
                     await self.setContinuation(continuation)
+                    try await self.configureInputRouting()
                     try await self.setupAudioEngine()
                     try await self.startEngine()
+                    await self.startDeviceListener()
                     audioLogger.info("Microphone capture started successfully")
                 } catch {
                     audioLogger.error("Failed to start microphone capture: \(error.localizedDescription, privacy: .public)")
@@ -58,44 +73,92 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
 
     /// Stop capturing audio
     public func stop() async {
+        deviceListenerTask?.cancel()
+        deviceListenerTask = nil
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         continuation?.finish()
         continuation = nil
         buffer.removeAll()
         audioConverter = nil
+        activeRouting = nil
+    }
+
+    public func setPreferredInputDevice(uid: String?) async {
+        preferredInputDeviceUID = uid
     }
 
     /// Set input device by device ID
     func setInputDevice(deviceID: String) async throws {
-        // Get available audio devices
         #if os(macOS)
-        let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.microphone, .external],
-            mediaType: .audio,
-            position: .unspecified
-        )
-        guard discoverySession.devices.contains(where: { $0.uniqueID == deviceID }) else {
+        guard let audioDeviceID = UInt32(deviceID) else {
             throw AudioCaptureError.deviceNotFound
         }
 
-        // Stop current engine if running
         if audioEngine.isRunning {
-            await stop()
+            audioEngine.stop()
         }
 
-        // Set the input device
-        _ = audioEngine.inputNode
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: targetSampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            throw AudioCaptureError.formatCreationFailed
+        let inputNode = audioEngine.inputNode
+        guard let audioUnit = inputNode.audioUnit else {
+            throw AudioCaptureError.deviceNotFound
         }
-        try audioEngine.inputNode.auAudioUnit.inputBusses[0].setFormat(format)
+        var mutableDeviceID = audioDeviceID
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &mutableDeviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+
+        guard status == noErr else {
+            throw AudioCaptureError.deviceSelectionFailed(status)
+        }
         #endif
+    }
+
+    private func configureInputRouting() async throws {
+        let devices = try audioDeviceManager.listInputDevices()
+        let defaultDevice = try audioDeviceManager.defaultInputDevice()
+        let routing = MicrophoneCaptureRouting.resolve(
+            preferredInputDeviceUID: preferredInputDeviceUID,
+            availableDevices: devices,
+            defaultDevice: defaultDevice
+        )
+        activeRouting = routing
+        try await setInputDevice(deviceID: String(routing.activeDevice.id))
+    }
+
+    private func startDeviceListener() {
+        deviceListenerTask?.cancel()
+        deviceListenerTask = Task { [weak self] in
+            guard let self else { return }
+            for await devices in audioDeviceManager.deviceChangeStream {
+                await self.handleAvailableDevicesChanged(devices)
+            }
+        }
+    }
+
+    private func handleAvailableDevicesChanged(_ devices: [AudioDevice]) async {
+        guard let activeRouting else { return }
+
+        let defaultDevice = try? audioDeviceManager.defaultInputDevice()
+        guard let rerouted = activeRouting.reroutingAfterDeviceChange(
+            availableDevices: devices,
+            defaultDevice: defaultDevice ?? nil
+        ) else {
+            return
+        }
+
+        do {
+            try await setInputDevice(deviceID: String(rerouted.activeDevice.id))
+            self.activeRouting = rerouted
+            audioLogger.info("Fell back microphone input to \(rerouted.activeDevice.name, privacy: .public)")
+        } catch {
+            audioLogger.error("Failed to reroute microphone input: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: - Private Methods
@@ -270,6 +333,7 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
 enum AudioCaptureError: Error, LocalizedError {
     case permissionDenied
     case deviceNotFound
+    case deviceSelectionFailed(OSStatus)
     case formatCreationFailed
     case converterCreationFailed
 
@@ -279,6 +343,8 @@ enum AudioCaptureError: Error, LocalizedError {
             return "Microphone permission denied"
         case .deviceNotFound:
             return "Audio device not found"
+        case .deviceSelectionFailed(let status):
+            return "Failed to select microphone device (OSStatus: \(status))"
         case .formatCreationFailed:
             return "Failed to create audio format"
         case .converterCreationFailed:

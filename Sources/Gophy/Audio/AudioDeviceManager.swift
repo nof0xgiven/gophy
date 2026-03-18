@@ -131,6 +131,35 @@ final class AudioDeviceManager: Sendable {
         _selectedDevice.set(device)
     }
 
+    func device(uid: String) throws -> AudioDevice? {
+        try listInputDevices().first(where: { $0.uid == uid })
+    }
+
+    func defaultInputDevice() throws -> AudioDevice? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID = AudioDeviceID(0)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+
+        guard status == noErr, deviceID != 0 else {
+            return nil
+        }
+
+        return try listInputDevices().first(where: { $0.id == deviceID })
+    }
+
     func triggerDeviceListRefresh() {
         notifyDeviceChange()
     }

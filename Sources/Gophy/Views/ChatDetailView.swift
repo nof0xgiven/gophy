@@ -88,11 +88,21 @@ struct ChatDetailView: View {
                     .font(.largeTitle)
                     .fontWeight(.bold)
 
-                if let badge = contextBadge {
+                HStack(spacing: 12) {
+                    if let badge = contextBadge {
+                        HStack(spacing: 4) {
+                            Image(systemName: chat.chatContextType?.displayIcon ?? "bubble.left.and.bubble.right")
+                                .font(.caption)
+                            Text(badge)
+                                .font(.subheadline)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+
                     HStack(spacing: 4) {
-                        Image(systemName: chat.chatContextType?.displayIcon ?? "bubble.left.and.bubble.right")
+                        Image(systemName: "cpu")
                             .font(.caption)
-                        Text(badge)
+                        Text(viewModel.activeProviderLabel)
                             .font(.subheadline)
                     }
                     .foregroundStyle(.secondary)
@@ -143,7 +153,7 @@ struct ChatDetailView: View {
                         HStack {
                             SwiftUI.ProgressView()
                                 .scaleEffect(0.7)
-                            Text("Generating...")
+                            Text("Generating via \(viewModel.activeProviderLabel)...")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -224,21 +234,27 @@ struct ChatDetailView: View {
 
             let embeddingEngine = EmbeddingEngine()
             let textGenEngine = TextGenerationEngine()
+            let transcriptionEngine = TranscriptionEngine()
+            let ocrEngine = OCREngine()
 
             if !embeddingEngine.isLoaded {
                 try await embeddingEngine.load()
             }
 
-            if !textGenEngine.isLoaded {
-                try await textGenEngine.load()
-            }
+            // Create ProviderRegistry so chat uses the user's selected provider (local or cloud)
+            let providerRegistry = ProviderRegistry(
+                transcriptionEngine: transcriptionEngine,
+                textGenerationEngine: textGenEngine,
+                embeddingEngine: embeddingEngine,
+                ocrEngine: ocrEngine
+            )
 
             let vectorSearchService = VectorSearchService(database: database)
 
             let ragPipeline = RAGPipeline(
                 embeddingEngine: embeddingEngine,
                 vectorSearchService: vectorSearchService,
-                textGenerationEngine: textGenEngine,
+                providerRegistry: providerRegistry,
                 meetingRepository: meetingRepo,
                 documentRepository: documentRepo
             )
@@ -247,7 +263,8 @@ struct ChatDetailView: View {
                 chat: chat,
                 chatMessageRepository: chatMessageRepo,
                 chatRepository: chatRepo,
-                ragPipeline: ragPipeline
+                ragPipeline: ragPipeline,
+                providerRegistry: providerRegistry
             )
             await vm.loadMessages()
             viewModel = vm

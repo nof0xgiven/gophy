@@ -138,15 +138,6 @@ public final class DynamicModelRegistry: ModelRegistryProtocol, Sendable {
                 source: .audioRegistry
             ),
             ModelDefinition(
-                id: "parakeet-tdt-1.1b-v2",
-                name: "Parakeet TDT 1.1B v2",
-                type: .stt,
-                huggingFaceID: "nvidia/parakeet-tdt-1.1b-v2",
-                approximateSizeGB: 4.5,
-                memoryUsageGB: 5.5,
-                source: .audioRegistry
-            ),
-            ModelDefinition(
                 id: "parakeet-ctc-1.1b",
                 name: "Parakeet CTC 1.1B",
                 type: .stt,
