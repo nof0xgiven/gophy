@@ -141,6 +141,54 @@ final class RAGPipelineTests: XCTestCase {
         XCTAssertEqual(tokens.count, 3)
         XCTAssertEqual(tokens, ["Hello", " world", "!"])
     }
+
+    func testQueryUsesActiveCloudEmbeddingProviderWhenConfigured() async throws {
+        let chunkId = UUID().uuidString
+        let chunk = DocumentChunkRecord(
+            id: chunkId,
+            documentId: "doc-1",
+            content: "Cloud embedding backed context",
+            chunkIndex: 0,
+            pageNumber: 1,
+            createdAt: Date()
+        )
+
+        documentRepository.chunks[chunkId] = chunk
+        vectorSearchService.searchResults = [
+            VectorSearchResult(id: chunkId, distance: 0.1)
+        ]
+
+        let cloudEmbeddingProvider = MockCloudEmbeddingProviderForRAG(embedding: [0.2, 0.3, 0.4])
+        let cloudTextProvider = MockTextGenerationProviderForRAG(tokens: ["Cloud", " answer"])
+        let providerResolver = MockRAGProviderResolver(
+            embeddingProvider: cloudEmbeddingProvider,
+            textGenerationProvider: cloudTextProvider,
+            embeddingProviderId: "openrouter"
+        )
+
+        let pipeline = RAGPipeline(
+            embeddingEngine: embeddingEngine,
+            vectorSearchService: vectorSearchService,
+            providerRegistry: providerResolver,
+            meetingRepository: meetingRepository,
+            documentRepository: documentRepository,
+            topK: 10
+        )
+
+        var tokens: [String] = []
+        let stream = pipeline.query(question: "Use cloud embeddings?", scope: .documents)
+
+        for await token in stream {
+            tokens.append(token)
+        }
+
+        XCTAssertEqual(tokens, ["Cloud", " answer"])
+        XCTAssertEqual(cloudEmbeddingProvider.embedCallCount, 1)
+        XCTAssertEqual(cloudEmbeddingProvider.lastEmbeddedText, "Use cloud embeddings?")
+        XCTAssertEqual(embeddingEngine.embedCallCount, 0)
+        XCTAssertEqual(vectorSearchService.searchCallCount, 1)
+        XCTAssertEqual(cloudTextProvider.generateCallCount, 1)
+    }
 }
 
 final class MockEmbeddingEngineForRAG: EmbeddingProviding, @unchecked Sendable {
@@ -191,6 +239,93 @@ final class MockTextGenerationEngineForRAG: TextGenerationProviding, @unchecked 
                 continuation.yield(token)
             }
             continuation.finish()
+        }
+    }
+}
+
+final class MockTextGenerationProviderForRAG: TextGenerationProvider, @unchecked Sendable {
+    private let tokens: [String]
+    var generateCallCount = 0
+    var lastPrompt: String?
+    var lastSystemPrompt: String?
+
+    init(tokens: [String]) {
+        self.tokens = tokens
+    }
+
+    func generate(
+        prompt: String,
+        systemPrompt: String,
+        maxTokens: Int,
+        temperature: Double
+    ) -> AsyncThrowingStream<String, Error> {
+        generateCallCount += 1
+        lastPrompt = prompt
+        lastSystemPrompt = systemPrompt
+
+        let tokens = self.tokens
+        return AsyncThrowingStream { continuation in
+            for token in tokens {
+                continuation.yield(token)
+            }
+            continuation.finish()
+        }
+    }
+}
+
+final class MockCloudEmbeddingProviderForRAG: EmbeddingProvider, @unchecked Sendable {
+    private let embedding: [Float]
+    var embedCallCount = 0
+    var lastEmbeddedText: String?
+    let dimensions: Int
+
+    init(embedding: [Float]) {
+        self.embedding = embedding
+        self.dimensions = embedding.count
+    }
+
+    func embed(text: String) async throws -> [Float] {
+        embedCallCount += 1
+        lastEmbeddedText = text
+        return embedding
+    }
+
+    func embedBatch(texts: [String]) async throws -> [[Float]] {
+        texts.map { _ in embedding }
+    }
+}
+
+final class MockRAGProviderResolver: RAGProviderResolving, @unchecked Sendable {
+    private let embeddingProvider: any EmbeddingProvider
+    private let textGenerationProvider: any TextGenerationProvider
+    private let embeddingProviderId: String
+
+    init(
+        embeddingProvider: any EmbeddingProvider,
+        textGenerationProvider: any TextGenerationProvider,
+        embeddingProviderId: String
+    ) {
+        self.embeddingProvider = embeddingProvider
+        self.textGenerationProvider = textGenerationProvider
+        self.embeddingProviderId = embeddingProviderId
+    }
+
+    func activeTextGenProvider() -> any TextGenerationProvider {
+        textGenerationProvider
+    }
+
+    func activeEmbeddingProvider() -> any EmbeddingProvider {
+        embeddingProvider
+    }
+
+    func selectedProviderId(for capability: ProviderCapability) -> String {
+        switch capability {
+        case .embedding:
+            return embeddingProviderId
+        case .textGeneration:
+            return "openrouter"
+        case .speechToText, .vision, .textToSpeech:
+            return "local"
         }
     }
 }

@@ -19,7 +19,8 @@ final class ModelDownloadManagerTests: XCTestCase {
         mockDownloader = MockModelDownloader()
         downloadManager = ModelDownloadManager(
             registry: modelRegistry,
-            downloader: mockDownloader
+            downloader: mockDownloader,
+            whisperKitDownloader: mockDownloader
         )
     }
 
@@ -95,8 +96,8 @@ final class ModelDownloadManagerTests: XCTestCase {
 
         let downloadPath = modelRegistry.downloadPath(for: model)
         try FileManager.default.createDirectory(at: downloadPath, withIntermediateDirectories: true)
-        let configFile = downloadPath.appendingPathComponent("config.json")
-        try "{}".write(to: configFile, atomically: true, encoding: .utf8)
+        let modelFile = downloadPath.appendingPathComponent("model.safetensors")
+        try Data([0x01]).write(to: modelFile)
 
         var progressUpdates: [DownloadProgress] = []
         let stream = downloadManager.download(model)
@@ -142,6 +143,57 @@ final class ModelDownloadManagerTests: XCTestCase {
             XCTAssertTrue(true, "Should emit failed status on download error")
         } else {
             XCTFail("Should have failed status")
+        }
+    }
+
+    func testDownloadReportsFailureWhenCompletedArtifactIsUnavailable() async throws {
+        let model = modelRegistry.availableModels().first!
+        mockDownloader.shouldSucceed = true
+        mockDownloader.createsModelArtifact = false
+
+        var lastStatus: DownloadStatus?
+        let stream = downloadManager.download(model)
+
+        for await progress in stream {
+            lastStatus = progress.status
+            if progress.status.isTerminal {
+                break
+            }
+        }
+
+        if case .failed = lastStatus {
+            XCTAssertTrue(true, "Should fail when downloader completes but registry cannot recognize usable artifacts")
+        } else {
+            XCTFail("Expected failed status for unavailable completed artifact, got \(String(describing: lastStatus))")
+        }
+    }
+
+    func testUnsupportedModelFailsBeforeDownload() async throws {
+        let model = ModelDefinition(
+            id: "unsupported-embedding",
+            name: "Unsupported Embedding",
+            type: .embedding,
+            huggingFaceID: "example/unsupported-embedding",
+            approximateSizeGB: nil,
+            memoryUsageGB: nil,
+            isDownloadable: false,
+            downloadDisabledReason: "Missing safetensors weights."
+        )
+
+        var lastStatus: DownloadStatus?
+        let stream = downloadManager.download(model)
+
+        for await progress in stream {
+            lastStatus = progress.status
+            if progress.status.isTerminal {
+                break
+            }
+        }
+
+        if case .failed(let error as ModelDownloadError) = lastStatus {
+            XCTAssertEqual(error.localizedDescription, "unsupported-embedding is not downloadable in Gophy. Missing safetensors weights.")
+        } else {
+            XCTFail("Expected unsupported model failure, got \(String(describing: lastStatus))")
         }
     }
 
@@ -193,6 +245,7 @@ final class ModelDownloadManagerTests: XCTestCase {
 
 final class MockModelDownloader: @unchecked Sendable, ModelDownloaderProtocol {
     var shouldSucceed = true
+    var createsModelArtifact = true
     var delayBetweenUpdates: TimeInterval = 0.01
     var downloadCalled = false
     private var isCancelled = false
@@ -220,6 +273,11 @@ final class MockModelDownloader: @unchecked Sendable, ModelDownloaderProtocol {
 
                         let bytesDownloaded = Int64(i * 100)
                         let status: DownloadStatus = i == 10 ? .completed : .downloading
+
+                        if case .completed = status, createsModelArtifact {
+                            try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                            try? Data([0x01]).write(to: destination.appendingPathComponent("model.safetensors"))
+                        }
 
                         continuation.yield(DownloadProgress(
                             model: model,

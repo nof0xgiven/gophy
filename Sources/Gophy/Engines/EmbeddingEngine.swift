@@ -29,7 +29,7 @@ public final class EmbeddingEngine: @unchecked Sendable {
 
         // Get embedding model configuration from registry using user selection
         let selectedId = UserDefaults.standard.string(forKey: "selectedEmbeddingModelId") ?? "multilingual-e5-small"
-        let embeddingModels = modelRegistry.availableModels().filter { $0.type == .embedding }
+        let embeddingModels = modelRegistry.availableModels().filter { $0.type == .embedding && $0.isDownloadable }
 
         guard let embeddingModel = embeddingModels.first(where: { $0.id == selectedId })
                 ?? embeddingModels.first else {

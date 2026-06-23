@@ -237,7 +237,9 @@ public final class DynamicModelRegistry: ModelRegistryProtocol, Sendable {
                     huggingFaceID: embedderConfig.name,
                     approximateSizeGB: nil,
                     memoryUsageGB: nil,
-                    source: .embeddersRegistry
+                    source: .embeddersRegistry,
+                    isDownloadable: embedderConfig.isDownloadable,
+                    downloadDisabledReason: embedderConfig.downloadDisabledReason
                 ))
             }
         }
@@ -253,32 +255,23 @@ public final class DynamicModelRegistry: ModelRegistryProtocol, Sendable {
     }
 
     public func isDownloaded(_ model: ModelDefinition) -> Bool {
-        let primaryPath = downloadPath(for: model)
-        logger.info("isDownloaded(\(model.id, privacy: .public)): checking primary=\(primaryPath.path, privacy: .public)")
-
-        if isModelAt(primaryPath) {
-            logger.info("isDownloaded(\(model.id, privacy: .public)): found at primary path")
-            return true
-        }
-        if let altPath = alternativeDownloadPath(for: model) {
-            logger.info("isDownloaded(\(model.id, privacy: .public)): checking alt=\(altPath.path, privacy: .public)")
-            if isModelAt(altPath) {
-                logger.info("isDownloaded(\(model.id, privacy: .public)): found at alternative path")
+        for path in ModelStorageLocator.candidatePaths(for: model, storageManager: storageManager) {
+            logger.info("isDownloaded(\(model.id, privacy: .public)): checking \(path.path, privacy: .public)")
+            if isModelAt(path) {
+                logger.info("isDownloaded(\(model.id, privacy: .public)): found at \(path.path, privacy: .public)")
                 return true
             }
         }
+
         logger.warning("isDownloaded(\(model.id, privacy: .public)): NOT FOUND at any path")
         return false
     }
 
     public func downloadPath(for model: ModelDefinition) -> URL {
-        // If model exists in alternative path but not primary, return alternative
-        let primaryPath = storageManager.modelsDirectory.appendingPathComponent(model.id)
-        if let altPath = alternativeDownloadPath(for: model),
-           !isModelAt(primaryPath) && isModelAt(altPath) {
-            return altPath
+        if let usablePath = ModelStorageLocator.usableModelPath(for: model, storageManager: storageManager) {
+            return usablePath
         }
-        return primaryPath
+        return storageManager.modelsDirectory.appendingPathComponent(model.id)
     }
 
     // MARK: - Search/Filter
@@ -303,54 +296,14 @@ public final class DynamicModelRegistry: ModelRegistryProtocol, Sendable {
             logger.info("isModelAt: directory does not exist: \(path.path, privacy: .public)")
             return false
         }
-        do {
-            let contents = try fileManager.contentsOfDirectory(
-                at: path,
-                includingPropertiesForKeys: nil,
-                options: .skipsHiddenFiles
-            )
-            let fileNames = contents.map { $0.lastPathComponent }
-            logger.info("isModelAt: \(path.lastPathComponent, privacy: .public) top-level (\(contents.count, privacy: .public) items): \(fileNames.joined(separator: ", "), privacy: .public)")
 
-            // Check top-level first
-            let hasWeights = contents.contains { url in
-                url.pathExtension == "safetensors" || url.pathExtension == "mlmodelc"
-            }
-            if hasWeights {
-                logger.info("isModelAt: found weights at top level")
-                return true
-            }
-
-            // Check one level of subdirectories (HuggingFace snapshot structure)
-            for url in contents {
-                var isDir: ObjCBool = false
-                if fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                    if let subContents = try? fileManager.contentsOfDirectory(
-                        at: url,
-                        includingPropertiesForKeys: nil,
-                        options: .skipsHiddenFiles
-                    ) {
-                        let subHasWeights = subContents.contains { subUrl in
-                            subUrl.pathExtension == "safetensors" || subUrl.pathExtension == "mlmodelc"
-                        }
-                        if subHasWeights {
-                            logger.info("isModelAt: found weights in subdirectory \(url.lastPathComponent, privacy: .public)")
-                            return true
-                        }
-                    }
-                }
-            }
-
-            logger.info("isModelAt: no weights found at \(path.lastPathComponent, privacy: .public)")
-            return false
-        } catch {
-            logger.error("isModelAt: failed to list directory \(path.path, privacy: .public): \(error, privacy: .public)")
-            return false
+        let hasArtifact = ModelFileDetector.containsUsableModelArtifact(at: path)
+        if hasArtifact {
+            logger.info("isModelAt: found usable model artifact under \(path.lastPathComponent, privacy: .public)")
+        } else {
+            logger.info("isModelAt: no usable model artifact found at \(path.lastPathComponent, privacy: .public)")
         }
-    }
-
-    private func alternativeDownloadPath(for model: ModelDefinition) -> URL? {
-        return storageManager.alternativeModelsDirectory?.appendingPathComponent(model.id)
+        return hasArtifact
     }
 
     private static func sanitizeModelId(_ name: String) -> String {
@@ -389,7 +342,11 @@ public final class DynamicModelRegistry: ModelRegistryProtocol, Sendable {
             EmbedderModelInfo(name: "nomic-ai/nomic-embed-text-v1.5"),
             EmbedderModelInfo(name: "BAAI/bge-large-en-v1.5"),
             EmbedderModelInfo(name: "Snowflake/snowflake-arctic-embed-l"),
-            EmbedderModelInfo(name: "BAAI/bge-m3"),
+            EmbedderModelInfo(
+                name: "BAAI/bge-m3",
+                isDownloadable: false,
+                downloadDisabledReason: "BAAI/bge-m3 does not publish safetensors weights required by Gophy's MLX embedding loader."
+            ),
             EmbedderModelInfo(name: "mixedbread-ai/mxbai-embed-large-v1"),
             EmbedderModelInfo(name: "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ")
         ]
@@ -399,4 +356,12 @@ public final class DynamicModelRegistry: ModelRegistryProtocol, Sendable {
 // Helper struct to represent embedder model info
 private struct EmbedderModelInfo {
     let name: String
+    let isDownloadable: Bool
+    let downloadDisabledReason: String?
+
+    init(name: String, isDownloadable: Bool = true, downloadDisabledReason: String? = nil) {
+        self.name = name
+        self.isDownloadable = isDownloadable
+        self.downloadDisabledReason = downloadDisabledReason
+    }
 }

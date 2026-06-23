@@ -77,6 +77,9 @@ public final class SettingsViewModel {
     // Provider settings
     var configuredProviderIds: Set<String> = []
     var providerErrorMessage: String?
+    var dynamicCloudModelsByProviderId: [String: [CloudModelDefinition]] = [:]
+    var loadingCloudModelProviderIds: Set<String> = []
+    var cloudModelLoadErrorsByProviderId: [String: String] = [:]
 
     // Observable per-capability provider/model selections (mirrors UserDefaults for UI reactivity)
     var selectedTextGenProviderId: String = "local"
@@ -326,7 +329,7 @@ public final class SettingsViewModel {
     }
 
     var availableEmbeddingModels: [ModelDefinition] {
-        registry.availableModels().filter { $0.type == .embedding }
+        registry.availableModels().filter { $0.type == .embedding && $0.isDownloadable }
     }
 
     func openDatabaseInFinder() {
@@ -705,10 +708,54 @@ public final class SettingsViewModel {
 
     func availableCloudModels(for capability: ProviderCapability, providerId: String) -> [CloudModelDefinition] {
         guard providerId != "local",
+              ProviderCatalog.provider(id: providerId) != nil else {
+            return []
+        }
+        return availableCloudModels(providerId: providerId).filter { $0.capability == capability }
+    }
+
+    func availableCloudModels(providerId: String) -> [CloudModelDefinition] {
+        guard providerId != "local",
               let config = ProviderCatalog.provider(id: providerId) else {
             return []
         }
-        return config.availableModels.filter { $0.capability == capability }
+        return dynamicCloudModelsByProviderId[providerId] ?? config.availableModels
+    }
+
+    func isLoadingCloudModels(providerId: String) -> Bool {
+        loadingCloudModelProviderIds.contains(providerId)
+    }
+
+    func cloudModelLoadError(providerId: String) -> String? {
+        cloudModelLoadErrorsByProviderId[providerId]
+    }
+
+    func refreshCloudModelsIfNeeded(providerId: String, force: Bool = false) async {
+        guard providerId == "openrouter",
+              let config = ProviderCatalog.provider(id: providerId) else {
+            return
+        }
+
+        if !force, dynamicCloudModelsByProviderId[providerId] != nil {
+            return
+        }
+
+        guard !loadingCloudModelProviderIds.contains(providerId) else {
+            return
+        }
+
+        loadingCloudModelProviderIds.insert(providerId)
+        cloudModelLoadErrorsByProviderId[providerId] = nil
+        defer { loadingCloudModelProviderIds.remove(providerId) }
+
+        do {
+            let apiKey = try keychainService.retrieve(for: providerId) ?? ""
+            let models = try await OpenRouterModelCatalog.fetchModels(baseURL: config.baseURL, apiKey: apiKey)
+            dynamicCloudModelsByProviderId[providerId] = models
+            selectDefaultModelIfNeeded(providerId: providerId, models: models)
+        } catch {
+            cloudModelLoadErrorsByProviderId[providerId] = error.localizedDescription
+        }
     }
 
     func selectCloudProvider(for capability: ProviderCapability, providerId: String, modelId: String) {
@@ -740,6 +787,24 @@ public final class SettingsViewModel {
         }
     }
 
+    private func selectDefaultModelIfNeeded(providerId: String, models: [CloudModelDefinition]) {
+        guard !models.isEmpty,
+              let config = ProviderCatalog.provider(id: providerId) else {
+            return
+        }
+
+        for capability in config.supportedCapabilities {
+            let capabilityModels = models.filter { $0.capability == capability }
+            let selectedModelId = selectedModelIdFor(capability)
+            guard selectedProviderIdFor(capability) == providerId,
+                  (selectedModelId.isEmpty || !capabilityModels.contains(where: { $0.id == selectedModelId })),
+                  let defaultModelId = capabilityModels.first?.id else {
+                continue
+            }
+            selectCloudProvider(for: capability, providerId: providerId, modelId: defaultModelId)
+        }
+    }
+
     func saveProviderAPIKey(providerId: String, apiKey: String) {
         do {
             if let registry = providerRegistry {
@@ -748,6 +813,8 @@ public final class SettingsViewModel {
                 try keychainService.save(apiKey: apiKey, for: providerId)
             }
             refreshConfiguredProviders()
+            dynamicCloudModelsByProviderId.removeValue(forKey: providerId)
+            cloudModelLoadErrorsByProviderId[providerId] = nil
             providerErrorMessage = nil
         } catch {
             providerErrorMessage = "Failed to save API key: \(error.localizedDescription)"
@@ -762,6 +829,8 @@ public final class SettingsViewModel {
                 try keychainService.delete(for: providerId)
             }
             refreshConfiguredProviders()
+            dynamicCloudModelsByProviderId.removeValue(forKey: providerId)
+            cloudModelLoadErrorsByProviderId.removeValue(forKey: providerId)
             providerErrorMessage = nil
         } catch {
             providerErrorMessage = "Failed to remove API key: \(error.localizedDescription)"

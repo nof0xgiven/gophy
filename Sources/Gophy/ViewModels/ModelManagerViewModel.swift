@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+enum ModelLocalStatus: Equatable {
+    case ready
+    case unsupported
+    case unavailable
+    case missing
+}
+
 @MainActor
 @Observable
 final class ModelManagerViewModel {
@@ -79,7 +86,24 @@ final class ModelManagerViewModel {
     }
 
     func isDownloaded(_ model: ModelDefinition) -> Bool {
-        return registry.isDownloaded(model)
+        return localStatus(for: model) == .ready
+    }
+
+    func localStatus(for model: ModelDefinition) -> ModelLocalStatus {
+        if registry.isDownloaded(model) {
+            return .ready
+        }
+        if !model.isDownloadable {
+            return .unsupported
+        }
+        if ModelStorageLocator.hasStoredFiles(for: model, storageManager: storageManager) {
+            return .unavailable
+        }
+        return .missing
+    }
+
+    func hasStoredFiles(for model: ModelDefinition) -> Bool {
+        ModelStorageLocator.hasStoredFiles(for: model, storageManager: storageManager)
     }
 
     func isDownloading(_ model: ModelDefinition) -> Bool {
@@ -126,7 +150,8 @@ final class ModelManagerViewModel {
     }
 
     func deleteModel(_ model: ModelDefinition) {
-        let path = registry.downloadPath(for: model)
+        let path = ModelStorageLocator.firstStoredPath(for: model, storageManager: storageManager)
+            ?? registry.downloadPath(for: model)
         let fileManager = FileManager.default
 
         do {
@@ -139,20 +164,10 @@ final class ModelManagerViewModel {
     }
 
     func calculateDiskUsage() {
-        let fileManager = FileManager.default
         var totalSize: Int64 = 0
 
-        for model in models {
-            let path = registry.downloadPath(for: model)
-
-            if let enumerator = fileManager.enumerator(at: path, includingPropertiesForKeys: [.fileSizeKey]) {
-                for case let fileURL as URL in enumerator {
-                    if let resourceValues = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
-                       let fileSize = resourceValues.fileSize {
-                        totalSize += Int64(fileSize)
-                    }
-                }
-            }
+        for model in allModels {
+            totalSize += ModelStorageLocator.storedBytes(for: model, storageManager: storageManager)
         }
 
         totalDiskUsageGB = Double(totalSize) / 1_000_000_000

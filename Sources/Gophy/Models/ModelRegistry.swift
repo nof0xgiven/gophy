@@ -64,20 +64,14 @@ public final class ModelRegistry: ModelRegistryProtocol, Sendable {
     }
 
     public func isDownloaded(_ model: ModelDefinition) -> Bool {
-        let primaryPath = downloadPath(for: model)
-        registryLogger.info("isDownloaded(\(model.id, privacy: .public)): checking primary=\(primaryPath.path, privacy: .public)")
-
-        if isModelAt(primaryPath) {
-            registryLogger.info("isDownloaded(\(model.id, privacy: .public)): found at primary path")
-            return true
-        }
-        if let altPath = alternativeDownloadPath(for: model) {
-            registryLogger.info("isDownloaded(\(model.id, privacy: .public)): checking alt=\(altPath.path, privacy: .public)")
-            if isModelAt(altPath) {
-                registryLogger.info("isDownloaded(\(model.id, privacy: .public)): found at alternative path")
+        for path in ModelStorageLocator.candidatePaths(for: model, storageManager: storageManager) {
+            registryLogger.info("isDownloaded(\(model.id, privacy: .public)): checking \(path.path, privacy: .public)")
+            if isModelAt(path) {
+                registryLogger.info("isDownloaded(\(model.id, privacy: .public)): found at \(path.path, privacy: .public)")
                 return true
             }
         }
+
         registryLogger.warning("isDownloaded(\(model.id, privacy: .public)): NOT FOUND at any path")
         return false
     }
@@ -88,62 +82,20 @@ public final class ModelRegistry: ModelRegistryProtocol, Sendable {
             registryLogger.info("isModelAt: directory does not exist: \(path.path, privacy: .public)")
             return false
         }
-        do {
-            let contents = try fileManager.contentsOfDirectory(
-                at: path,
-                includingPropertiesForKeys: nil,
-                options: .skipsHiddenFiles
-            )
-            let fileNames = contents.map { $0.lastPathComponent }
-            registryLogger.info("isModelAt: \(path.lastPathComponent, privacy: .public) top-level (\(contents.count, privacy: .public) items): \(fileNames.joined(separator: ", "), privacy: .public)")
 
-            let hasWeights = contents.contains { url in
-                url.pathExtension == "safetensors" || url.pathExtension == "mlmodelc"
-            }
-            if hasWeights {
-                registryLogger.info("isModelAt: found weights at top level")
-                return true
-            }
-
-            // Check one level of subdirectories
-            for url in contents {
-                var isDir: ObjCBool = false
-                if fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                    if let subContents = try? fileManager.contentsOfDirectory(
-                        at: url,
-                        includingPropertiesForKeys: nil,
-                        options: .skipsHiddenFiles
-                    ) {
-                        let subHasWeights = subContents.contains { subUrl in
-                            subUrl.pathExtension == "safetensors" || subUrl.pathExtension == "mlmodelc"
-                        }
-                        if subHasWeights {
-                            registryLogger.info("isModelAt: found weights in subdirectory \(url.lastPathComponent, privacy: .public)")
-                            return true
-                        }
-                    }
-                }
-            }
-
-            registryLogger.info("isModelAt: no weights found at \(path.lastPathComponent, privacy: .public)")
-            return false
-        } catch {
-            registryLogger.error("isModelAt: failed to list directory \(path.path, privacy: .public): \(error, privacy: .public)")
-            return false
+        let hasArtifact = ModelFileDetector.containsUsableModelArtifact(at: path)
+        if hasArtifact {
+            registryLogger.info("isModelAt: found usable model artifact under \(path.lastPathComponent, privacy: .public)")
+        } else {
+            registryLogger.info("isModelAt: no usable model artifact found at \(path.lastPathComponent, privacy: .public)")
         }
+        return hasArtifact
     }
 
     public func downloadPath(for model: ModelDefinition) -> URL {
-        // If model exists in alternative path but not primary, return alternative
-        let primaryPath = storageManager.modelsDirectory.appendingPathComponent(model.id)
-        if let altPath = alternativeDownloadPath(for: model),
-           !isModelAt(primaryPath) && isModelAt(altPath) {
-            return altPath
+        if let usablePath = ModelStorageLocator.usableModelPath(for: model, storageManager: storageManager) {
+            return usablePath
         }
-        return primaryPath
-    }
-
-    private func alternativeDownloadPath(for model: ModelDefinition) -> URL? {
-        return storageManager.alternativeModelsDirectory?.appendingPathComponent(model.id)
+        return storageManager.modelsDirectory.appendingPathComponent(model.id)
     }
 }

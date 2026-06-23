@@ -1,8 +1,5 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import os
-
-private let docViewLogger = Logger(subsystem: "com.gophy.app", category: "DocumentManagerView")
 
 @MainActor
 struct DocumentManagerView: View {
@@ -259,49 +256,29 @@ struct DocumentManagerView: View {
             let documentRepo = DocumentRepository(database: database)
             let meetingRepo = MeetingRepository(database: database)
 
-            // OCR engine: load first since it is essential for document processing
+            // OCR auto-loads when a scanned PDF or image actually needs it. Loading it here
+            // makes opening the Documents tab depend on multi-GB model startup.
             let ocrEngine = OCREngine()
-            let allOCRModels = ModelRegistry.shared.availableModels().filter { $0.type == .ocr }
-            docViewLogger.info("OCR models available: \(allOCRModels.map { $0.id }.joined(separator: ", "), privacy: .public)")
-            if let ocrModel = allOCRModels.first {
-                let downloaded = ModelRegistry.shared.isDownloaded(ocrModel)
-                let path = ModelRegistry.shared.downloadPath(for: ocrModel)
-                docViewLogger.info("OCR model '\(ocrModel.id, privacy: .public)' isDownloaded=\(downloaded, privacy: .public) path=\(path.path, privacy: .public)")
-                if downloaded {
-                    let ocrEngineLoaded = await ocrEngine.isLoaded
-                    docViewLogger.info("OCR engine isLoaded=\(ocrEngineLoaded, privacy: .public)")
-                    if !ocrEngineLoaded {
-                        docViewLogger.info("Calling ocrEngine.load()...")
-                        try await ocrEngine.load()
-                        docViewLogger.info("ocrEngine.load() completed successfully")
-                    }
-                } else {
-                    docViewLogger.warning("OCR model NOT downloaded, skipping load. Check model directory at \(path.path, privacy: .public)")
-                }
-            } else {
-                docViewLogger.warning("No OCR models found in registry")
-            }
 
-            // Embedding engine: load separately, non-fatal if it fails
+            // Embeddings are optional for rendering/managing documents. They load when
+            // indexing is possible; indexing failures must not block the Documents tab.
             let embeddingEngine = EmbeddingEngine()
-            if ModelRegistry.shared.availableModels().first(where: { $0.type == .embedding }) != nil {
-                if !embeddingEngine.isLoaded {
-                    do {
-                        try await embeddingEngine.load()
-                    } catch {
-                        // Embedding is optional for document processing
-                        // Documents can still be processed with OCR without vector search
-                    }
-                }
-            }
-
-            let vectorSearchService = VectorSearchService(database: database, embeddingDimension: embeddingEngine.embeddingDimension)
-            if embeddingEngine.embeddingDimension > 0 {
-                try await vectorSearchService.ensureDimension(embeddingEngine.embeddingDimension)
-            }
-            let embeddingPipeline = EmbeddingPipeline(
+            let textGenerationEngine = TextGenerationEngine()
+            let transcriptionEngine = TranscriptionEngine()
+            let providerRegistry = ProviderRegistry(
+                transcriptionEngine: transcriptionEngine,
+                textGenerationEngine: textGenerationEngine,
                 embeddingEngine: embeddingEngine,
-                vectorSearchService: vectorSearchService,
+                ocrEngine: ocrEngine
+            )
+            let activeEmbeddingProvider = ActiveEmbeddingProviderAdapter(
+                providerResolver: providerRegistry,
+                localEmbeddingEngine: embeddingEngine
+            )
+
+            let embeddingPipeline = EmbeddingPipeline(
+                embeddingEngine: activeEmbeddingProvider,
+                vectorSearchService: VectorSearchService(database: database),
                 meetingRepository: meetingRepo,
                 documentRepository: documentRepo
             )

@@ -333,12 +333,20 @@ public enum ProviderCatalog {
         name: "OpenRouter",
         baseURL: URL(string: "https://openrouter.ai/api/v1")!,
         isOpenAICompatible: true,
-        supportedCapabilities: [.textGeneration],
+        supportedCapabilities: [.textGeneration, .embedding, .vision],
         availableModels: [
             CloudModelDefinition(
                 id: "openai/gpt-4o",
                 name: "OpenAI GPT-4o (via OpenRouter)",
                 capability: .textGeneration,
+                contextWindow: 128_000,
+                inputPricePer1MTokens: 2.50,
+                outputPricePer1MTokens: 10.00
+            ),
+            CloudModelDefinition(
+                id: "openai/gpt-4o",
+                name: "OpenAI GPT-4o Vision (via OpenRouter)",
+                capability: .vision,
                 contextWindow: 128_000,
                 inputPricePer1MTokens: 2.50,
                 outputPricePer1MTokens: 10.00
@@ -360,6 +368,20 @@ public enum ProviderCatalog {
                 id: "google/gemini-3.1-flash-lite-preview",
                 name: "Gemini 3.1 Flash Lite Preview (via OpenRouter)",
                 capability: .textGeneration
+            ),
+            CloudModelDefinition(
+                id: "openai/text-embedding-3-small",
+                name: "Text Embedding 3 Small (via OpenRouter)",
+                capability: .embedding,
+                contextWindow: 8192,
+                inputPricePer1MTokens: 0.02
+            ),
+            CloudModelDefinition(
+                id: "openai/text-embedding-3-large",
+                name: "Text Embedding 3 Large (via OpenRouter)",
+                capability: .embedding,
+                contextWindow: 8192,
+                inputPricePer1MTokens: 0.13
             )
         ]
     )

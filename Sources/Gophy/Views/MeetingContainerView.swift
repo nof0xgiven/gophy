@@ -157,8 +157,12 @@ struct MeetingContainerView: View {
 
             // Create vector search and embedding pipeline
             let vectorSearchService = VectorSearchService(database: database)
+            let activeEmbeddingProvider = ActiveEmbeddingProviderAdapter(
+                providerResolver: providerRegistry,
+                localEmbeddingEngine: embeddingEngine
+            )
             let embeddingPipeline = EmbeddingPipeline(
-                embeddingEngine: embeddingEngine,
+                embeddingEngine: activeEmbeddingProvider,
                 vectorSearchService: vectorSearchService,
                 meetingRepository: meetingRepo,
                 documentRepository: documentRepo

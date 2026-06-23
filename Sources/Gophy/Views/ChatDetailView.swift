@@ -9,6 +9,7 @@ struct ChatDetailView: View {
     let database: GophyDatabase
 
     @State private var viewModel: ChatDetailViewModel?
+    @State private var initError: String?
     @State private var showClearConfirmation: Bool = false
 
     var body: some View {
@@ -54,6 +55,8 @@ struct ChatDetailView: View {
                         showClearConfirmation = true
                     }
                 }
+            } else if let initError {
+                initializationErrorView(message: initError)
             } else {
                 SwiftUI.ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -221,55 +224,37 @@ struct ChatDetailView: View {
         .background(Color.red.opacity(0.1))
     }
 
+    private func initializationErrorView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 48))
+                .foregroundStyle(.orange)
+
+            Text("Chat Unavailable")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
     private func canSend(_ viewModel: ChatDetailViewModel) -> Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isGenerating
     }
 
     private func initializeViewModel() async {
         do {
-            let documentRepo = DocumentRepository(database: database)
-            let meetingRepo = MeetingRepository(database: database)
-            let chatMessageRepo = ChatMessageRepository(database: database)
-            let chatRepo = ChatRepository(database: database)
-
-            let embeddingEngine = EmbeddingEngine()
-            let textGenEngine = TextGenerationEngine()
-            let transcriptionEngine = TranscriptionEngine()
-            let ocrEngine = OCREngine()
-
-            if !embeddingEngine.isLoaded {
-                try await embeddingEngine.load()
-            }
-
-            // Create ProviderRegistry so chat uses the user's selected provider (local or cloud)
-            let providerRegistry = ProviderRegistry(
-                transcriptionEngine: transcriptionEngine,
-                textGenerationEngine: textGenEngine,
-                embeddingEngine: embeddingEngine,
-                ocrEngine: ocrEngine
-            )
-
-            let vectorSearchService = VectorSearchService(database: database)
-
-            let ragPipeline = RAGPipeline(
-                embeddingEngine: embeddingEngine,
-                vectorSearchService: vectorSearchService,
-                providerRegistry: providerRegistry,
-                meetingRepository: meetingRepo,
-                documentRepository: documentRepo
-            )
-
-            let vm = ChatDetailViewModel(
-                chat: chat,
-                chatMessageRepository: chatMessageRepo,
-                chatRepository: chatRepo,
-                ragPipeline: ragPipeline,
-                providerRegistry: providerRegistry
-            )
-            await vm.loadMessages()
-            viewModel = vm
+            initError = nil
+            viewModel = try await ChatDetailViewModelFactory().make(chat: chat, database: database)
         } catch {
             logger.error("Failed to initialize ChatDetailView: \(error.localizedDescription, privacy: .public)")
+            initError = "Failed to initialize chat: \(error.localizedDescription)"
         }
     }
 }

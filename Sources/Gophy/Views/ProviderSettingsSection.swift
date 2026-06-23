@@ -65,25 +65,53 @@ struct ProviderSettingsSection: View {
 
     private func capabilityPicker(label: String, capability: ProviderCapability) -> some View {
         VStack(alignment: .leading, spacing: 4) {
+            let configuredProviders = viewModel.configuredProviderConfigs(for: capability)
+
             HStack {
                 Text(label)
                     .font(.subheadline)
 
                 Spacer()
 
-                Picker("", selection: providerBinding(for: capability)) {
-                    Text("Local (On-Device)").tag("local")
-                    ForEach(viewModel.configuredProviderConfigs(for: capability), id: \.id) { config in
-                        Text(config.name).tag(config.id)
+                if configuredProviders.isEmpty {
+                    Text("No cloud provider configured")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 240, alignment: .trailing)
+                } else {
+                    Picker("", selection: providerBinding(for: capability, configuredProviders: configuredProviders)) {
+                        Text("Select Cloud Provider").tag("")
+                        ForEach(configuredProviders, id: \.id) { config in
+                            Text(config.name).tag(config.id)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .frame(width: 200)
                 }
-                .pickerStyle(.menu)
-                .frame(width: 200)
             }
 
-            if viewModel.selectedProviderIdFor(capability) != "local" {
-                let providerId = viewModel.selectedProviderIdFor(capability)
+            if let providerId = selectedConfiguredProviderId(for: capability, configuredProviders: configuredProviders) {
                 let models = viewModel.availableCloudModels(for: capability, providerId: providerId)
+                if viewModel.isLoadingCloudModels(providerId: providerId) {
+                    HStack {
+                        SwiftUI.ProgressView()
+                            .controlSize(.small)
+                        Text("Loading models...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.leading, 20)
+                }
+
+                if let error = viewModel.cloudModelLoadError(providerId: providerId) {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .padding(.leading, 20)
+                }
+
                 if !models.isEmpty {
                     HStack {
                         Text("Model")
@@ -104,12 +132,40 @@ struct ProviderSettingsSection: View {
                 }
             }
         }
+        .task(id: "\(capability.rawValue)-\(viewModel.configuredProviderIds.sorted().joined(separator: ","))-\(viewModel.selectedProviderIdFor(capability))") {
+            if let providerId = selectedConfiguredProviderId(
+                for: capability,
+                configuredProviders: viewModel.configuredProviderConfigs(for: capability)
+            ) {
+                await viewModel.refreshCloudModelsIfNeeded(providerId: providerId)
+            }
+        }
     }
 
-    private func providerBinding(for capability: ProviderCapability) -> Binding<String> {
+    private func selectedConfiguredProviderId(
+        for capability: ProviderCapability,
+        configuredProviders: [ProviderConfiguration]
+    ) -> String? {
+        let selectedProviderId = viewModel.selectedProviderIdFor(capability)
+        if configuredProviders.contains(where: { $0.id == selectedProviderId }) {
+            return selectedProviderId
+        }
+        return nil
+    }
+
+    private func providerBinding(
+        for capability: ProviderCapability,
+        configuredProviders: [ProviderConfiguration]
+    ) -> Binding<String> {
         Binding(
-            get: { viewModel.selectedProviderIdFor(capability) },
+            get: {
+                selectedConfiguredProviderId(for: capability, configuredProviders: configuredProviders) ?? ""
+            },
             set: { newId in
+                guard !newId.isEmpty else {
+                    viewModel.selectCloudProvider(for: capability, providerId: "local", modelId: "")
+                    return
+                }
                 let models = viewModel.availableCloudModels(for: capability, providerId: newId)
                 let defaultModel = models.first?.id ?? ""
                 viewModel.selectCloudProvider(for: capability, providerId: newId, modelId: defaultModel)
@@ -306,15 +362,33 @@ private struct ProviderDetailSheet: View {
                 }
             }
 
-            if !config.availableModels.isEmpty {
+            let availableModels = viewModel.availableCloudModels(providerId: config.id)
+            let isLoadingModels = viewModel.isLoadingCloudModels(providerId: config.id)
+            let modelLoadError = viewModel.cloudModelLoadError(providerId: config.id)
+            if !availableModels.isEmpty || isLoadingModels || modelLoadError != nil {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Available Models")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("Available Models")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
 
-                    ForEach(config.availableModels) { model in
+                        Spacer()
+
+                        if isLoadingModels {
+                            SwiftUI.ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+
+                    if let error = modelLoadError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
+                    ForEach(availableModels) { model in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(model.name)
@@ -346,6 +420,9 @@ private struct ProviderDetailSheet: View {
             }
 
             Spacer()
+        }
+        .task {
+            await viewModel.refreshCloudModelsIfNeeded(providerId: config.id)
         }
         .padding(24)
         .frame(width: 500, height: 600)

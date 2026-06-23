@@ -91,6 +91,8 @@ public final class VectorSearchService: Sendable {
             guard embedding.count == _embeddingDimension else {
                 throw VectorSearchError.invalidEmbeddingDimension(expected: _embeddingDimension, got: embedding.count)
             }
+        } else {
+            try await ensureDimension(embedding.count)
         }
 
         let blob = embedding.withUnsafeBytes { Data($0) }
@@ -113,6 +115,8 @@ public final class VectorSearchService: Sendable {
             guard query.count == _embeddingDimension else {
                 throw VectorSearchError.invalidEmbeddingDimension(expected: _embeddingDimension, got: query.count)
             }
+        } else {
+            try await ensureDimension(query.count)
         }
 
         let queryBlob = query.withUnsafeBytes { Data($0) }

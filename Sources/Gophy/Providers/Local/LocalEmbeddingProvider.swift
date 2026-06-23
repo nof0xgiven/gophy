@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol EmbeddingCapable: EmbeddingEngineProtocol {
+public protocol EmbeddingCapable: EmbeddingEngineProtocol, EmbeddingProviding {
     func embed(text: String, mode: EmbeddingMode) async throws -> [Float]
     func embedBatch(texts: [String], mode: EmbeddingMode) async throws -> [[Float]]
 }

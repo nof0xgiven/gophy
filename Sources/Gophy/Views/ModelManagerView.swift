@@ -45,9 +45,11 @@ struct ModelManagerView: View {
 
             List {
                 ForEach(viewModel.models) { model in
+                    let localStatus = viewModel.localStatus(for: model)
                     ModelRow(
                         model: model,
-                        isDownloaded: viewModel.isDownloaded(model),
+                        localStatus: localStatus,
+                        hasStoredFiles: viewModel.hasStoredFiles(for: model),
                         isDownloading: viewModel.isDownloading(model),
                         isSelected: viewModel.isSelectedModel(model),
                         progress: viewModel.downloadProgress[model.id],
@@ -108,7 +110,8 @@ struct ErrorBanner: View {
 
 struct ModelRow: View {
     let model: ModelDefinition
-    let isDownloaded: Bool
+    let localStatus: ModelLocalStatus
+    let hasStoredFiles: Bool
     let isDownloading: Bool
     let isSelected: Bool
     let progress: DownloadProgress?
@@ -144,7 +147,7 @@ struct ModelRow: View {
                         Spacer()
 
                         StatusBadge(
-                            isDownloaded: isDownloaded,
+                            localStatus: localStatus,
                             isDownloading: isDownloading
                         )
                     }
@@ -172,7 +175,7 @@ struct ModelRow: View {
                 Spacer()
 
                 HStack(spacing: 8) {
-                    if isDownloaded && !isSelected {
+                    if localStatus == .ready && !isSelected {
                         Button(action: onSelect) {
                             Text("Use")
                                 .frame(width: 50)
@@ -181,7 +184,9 @@ struct ModelRow: View {
                     }
 
                     ActionButton(
-                        isDownloaded: isDownloaded,
+                        isDownloadable: model.isDownloadable,
+                        localStatus: localStatus,
+                        hasStoredFiles: hasStoredFiles,
                         isDownloading: isDownloading,
                         onDownload: onDownload,
                         onCancel: onCancel,
@@ -232,7 +237,7 @@ struct ModelRow: View {
 }
 
 struct StatusBadge: View {
-    let isDownloaded: Bool
+    let localStatus: ModelLocalStatus
     let isDownloading: Bool
 
     var body: some View {
@@ -252,20 +257,28 @@ struct StatusBadge: View {
     }
 
     private var badgeText: String {
-        if isDownloaded {
+        if localStatus == .ready {
             return "Ready"
         } else if isDownloading {
             return "Downloading"
+        } else if localStatus == .unsupported {
+            return "Unsupported"
+        } else if localStatus == .unavailable {
+            return "Unavailable"
         } else {
             return "Not Downloaded"
         }
     }
 
     private var badgeColor: Color {
-        if isDownloaded {
+        if localStatus == .ready {
             return .green
         } else if isDownloading {
             return .blue
+        } else if localStatus == .unsupported {
+            return .orange
+        } else if localStatus == .unavailable {
+            return .orange
         } else {
             return .gray
         }
@@ -273,7 +286,9 @@ struct StatusBadge: View {
 }
 
 struct ActionButton: View {
-    let isDownloaded: Bool
+    let isDownloadable: Bool
+    let localStatus: ModelLocalStatus
+    let hasStoredFiles: Bool
     let isDownloading: Bool
     let onDownload: () -> Void
     let onCancel: () -> Void
@@ -286,19 +301,48 @@ struct ActionButton: View {
                     .frame(width: 80)
             }
             .buttonStyle(.bordered)
-        } else if isDownloaded {
+        } else if localStatus == .ready {
             Button(action: onDelete) {
                 Text("Delete")
                     .frame(width: 80)
             }
             .buttonStyle(.bordered)
             .foregroundStyle(.red)
-        } else {
-            Button(action: onDownload) {
-                Text("Download")
-                    .frame(width: 80)
+        } else if !isDownloadable {
+            HStack(spacing: 8) {
+                if hasStoredFiles {
+                    Button(action: onDelete) {
+                        Text("Remove")
+                            .frame(width: 80)
+                    }
+                    .buttonStyle(.bordered)
+                    .foregroundStyle(.red)
+                }
+
+                Button(action: {}) {
+                    Text("Unsupported")
+                        .frame(width: 92)
+                }
+                .buttonStyle(.bordered)
+                .disabled(true)
             }
-            .buttonStyle(.borderedProminent)
+        } else {
+            HStack(spacing: 8) {
+                if localStatus == .unavailable {
+                    Button(action: onDelete) {
+                        Text("Remove")
+                            .frame(width: 80)
+                    }
+                    .buttonStyle(.bordered)
+                    .foregroundStyle(.red)
+                }
+
+                Button(action: onDownload) {
+                    Text("Download")
+                        .frame(width: 80)
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
     }
 }

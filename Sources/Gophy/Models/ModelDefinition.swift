@@ -24,6 +24,8 @@ public struct ModelDefinition: Sendable, Identifiable {
     public let approximateSizeGB: Double?
     public let memoryUsageGB: Double?
     public let source: ModelSource
+    public let isDownloadable: Bool
+    public let downloadDisabledReason: String?
 
     public init(
         id: String,
@@ -32,7 +34,9 @@ public struct ModelDefinition: Sendable, Identifiable {
         huggingFaceID: String,
         approximateSizeGB: Double?,
         memoryUsageGB: Double?,
-        source: ModelSource = .curated
+        source: ModelSource = .curated,
+        isDownloadable: Bool = true,
+        downloadDisabledReason: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -41,5 +45,7 @@ public struct ModelDefinition: Sendable, Identifiable {
         self.approximateSizeGB = approximateSizeGB
         self.memoryUsageGB = memoryUsageGB
         self.source = source
+        self.isDownloadable = isDownloadable
+        self.downloadDisabledReason = downloadDisabledReason
     }
 }

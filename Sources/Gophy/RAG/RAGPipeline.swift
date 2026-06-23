@@ -12,9 +12,16 @@ public protocol DocumentRepositoryProtocol: Sendable {
     func getChunk(id: String) async throws -> DocumentChunkRecord?
 }
 
+public protocol RAGProviderResolving: Sendable {
+    func activeTextGenProvider() -> any TextGenerationProvider
+    func activeEmbeddingProvider() -> any EmbeddingProvider
+    func selectedProviderId(for capability: ProviderCapability) -> String
+}
+
 extension TextGenerationEngine: TextGenerationProviding {}
 extension VectorSearchService: VectorSearching {}
 extension DocumentRepository: DocumentRepositoryProtocol {}
+extension ProviderRegistry: RAGProviderResolving {}
 
 /// Adapter that wraps TextGenerationProviding as a TextGenerationProvider for RAG
 private final class TextGenProvidingAdapter: TextGenerationProvider, @unchecked Sendable {
@@ -41,7 +48,7 @@ public final class RAGPipeline: Sendable {
     private let embeddingEngine: any EmbeddingProviding
     private let vectorSearchService: any VectorSearching
     private let textGenProvider: (any TextGenerationProvider)?
-    private let providerRegistry: ProviderRegistry?
+    private let providerRegistry: (any RAGProviderResolving)?
     private let meetingRepository: any MeetingRepositoryProtocol
     private let documentRepository: any DocumentRepositoryProtocol
     private let topK: Int
@@ -54,11 +61,22 @@ public final class RAGPipeline: Sendable {
         return textGenProvider ?? TextGenProvidingAdapter(engine: TextGenerationEngine())
     }
 
+    /// Resolve query embeddings from the active embedding provider when cloud is selected.
+    /// Keep local embeddings on the mode-aware engine so E5-style query prefixes are preserved.
+    private func embedQuery(_ question: String) async throws -> [Float] {
+        if let registry = providerRegistry,
+           registry.selectedProviderId(for: .embedding) != "local" {
+            return try await registry.activeEmbeddingProvider().embed(text: question)
+        }
+
+        return try await embeddingEngine.embed(text: question, mode: .query)
+    }
+
     /// Initialize with a ProviderRegistry (preferred — enables dynamic provider switching)
     public init(
         embeddingEngine: any EmbeddingProviding,
         vectorSearchService: any VectorSearching,
-        providerRegistry: ProviderRegistry,
+        providerRegistry: any RAGProviderResolving,
         meetingRepository: any MeetingRepositoryProtocol,
         documentRepository: any DocumentRepositoryProtocol,
         topK: Int = 10
@@ -112,7 +130,7 @@ public final class RAGPipeline: Sendable {
         AsyncStream { continuation in
             Task {
                 do {
-                    let embedding = try await embeddingEngine.embed(text: question, mode: .query)
+                    let embedding = try await embedQuery(question)
 
                     let searchResults = try await vectorSearchService.search(query: embedding, limit: topK)
 

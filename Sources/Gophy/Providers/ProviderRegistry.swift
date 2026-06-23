@@ -280,18 +280,7 @@ public final class ProviderRegistry: @unchecked Sendable {
         let sttModel: String? = capability == .speechToText ? (modelId.isEmpty ? nil : modelId) : nil
         let visionModel: String? = capability == .vision ? (modelId.isEmpty ? nil : modelId) : nil
 
-        let dimensions: Int
-        if let embModel = embeddingModel {
-            if embModel.contains("3-large") {
-                dimensions = 3072
-            } else if embModel.contains("3-small") {
-                dimensions = 1536
-            } else {
-                dimensions = 1536
-            }
-        } else {
-            dimensions = 1536
-        }
+        let dimensions = embeddingModel.map(Self.embeddingDimensions(for:)) ?? 1536
 
         return OpenAICompatibleProvider(
             providerId: config.id,
@@ -303,6 +292,20 @@ public final class ProviderRegistry: @unchecked Sendable {
             sttModel: sttModel,
             visionModel: visionModel
         )
+    }
+
+    static func embeddingDimensions(for modelId: String) -> Int {
+        let normalized = modelId.lowercased()
+        if normalized.contains("text-embedding-3-large") || normalized.contains("3-large") {
+            return 3072
+        }
+        if normalized.contains("text-embedding-3-small") || normalized.contains("3-small") {
+            return 1536
+        }
+        if normalized.contains("bge-m3") {
+            return 1024
+        }
+        return 1536
     }
 
     // MARK: - Local Provider Builders

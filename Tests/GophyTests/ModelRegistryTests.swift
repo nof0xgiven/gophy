@@ -75,7 +75,7 @@ final class ModelRegistryTests: XCTestCase {
         }
     }
 
-    func testIsDownloadedReturnsTrueWhenModelDirectoryExistsWithFiles() throws {
+    func testIsDownloadedReturnsTrueWhenModelDirectoryExistsWithUsableArtifact() throws {
         let models = modelRegistry.availableModels()
         guard let firstModel = models.first else {
             XCTFail("No models available")
@@ -85,12 +85,12 @@ final class ModelRegistryTests: XCTestCase {
         let downloadPath = modelRegistry.downloadPath(for: firstModel)
         try FileManager.default.createDirectory(at: downloadPath, withIntermediateDirectories: true)
 
-        let configFile = downloadPath.appendingPathComponent("config.json")
-        try "{}".write(to: configFile, atomically: true, encoding: .utf8)
+        let modelFile = downloadPath.appendingPathComponent("model.safetensors")
+        try Data([0x01]).write(to: modelFile)
 
         XCTAssertTrue(
             modelRegistry.isDownloaded(firstModel),
-            "Model should be marked as downloaded when directory exists with files"
+            "Model should be marked as downloaded when directory exists with a usable artifact"
         )
     }
 

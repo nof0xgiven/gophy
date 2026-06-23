@@ -233,6 +233,52 @@ final class SuggestionEngineTests: XCTestCase {
 
         XCTAssertEqual(suggestion, "Combined context")
     }
+
+    func testCloudEmbeddingProviderUsedForSuggestionRetrievalWhenSelected() async throws {
+        await mockMeetingRepo.setTranscript(for: "meeting1", segments: [
+            TranscriptSegmentRecord(
+                id: "seg1",
+                meetingId: "meeting1",
+                text: "The client asked about the migration timeline",
+                speaker: "Client",
+                startTime: 0.0,
+                endTime: 5.0,
+                createdAt: Date()
+            )
+        ])
+        await mockEmbedding.setEmbedding(Array(repeating: 0.1, count: 768))
+        await mockVectorSearch.setResults([])
+
+        let cloudEmbedding = MockSuggestionCloudEmbeddingProvider(embedding: [0.7, 0.8, 0.9])
+        let cloudText = MockSuggestionTextGenerationProvider(tokens: ["Cloud", " suggestion"])
+        let providerResolver = MockSuggestionProviderResolver(
+            embeddingProvider: cloudEmbedding,
+            textGenerationProvider: cloudText,
+            embeddingProviderId: "openrouter"
+        )
+
+        let engine = SuggestionEngine(
+            providerRegistry: providerResolver,
+            vectorSearchService: mockVectorSearch,
+            embeddingEngine: mockEmbedding,
+            meetingRepository: mockMeetingRepo,
+            documentRepository: mockDocumentRepo,
+            chatMessageRepository: mockChatRepo,
+            autoTriggerInterval: 30.0
+        )
+
+        let suggestion = try await engine.generateSuggestion(meetingId: "meeting1")
+
+        XCTAssertEqual(suggestion, "Cloud suggestion")
+        let cloudEmbedCallCount = await cloudEmbedding.embedCallCount
+        let cloudLastEmbeddedText = await cloudEmbedding.lastEmbeddedText
+        let localEmbedCallCount = await mockEmbedding.embedCallCount
+        let lastSearchQuery = await mockVectorSearch.lastQuery
+        XCTAssertEqual(cloudEmbedCallCount, 1)
+        XCTAssertEqual(cloudLastEmbeddedText, "The client asked about the migration timeline")
+        XCTAssertEqual(localEmbedCallCount, 0)
+        XCTAssertEqual(lastSearchQuery, [0.7, 0.8, 0.9])
+    }
 }
 
 // MARK: - Mock Text Generation Engine
@@ -275,9 +321,11 @@ actor MockTextGenerationForSuggestion: TextGenerationForSuggestion {
 
 actor MockVectorSearchForSuggestion: VectorSearchForSuggestion {
     private var resultsToReturn: [VectorSearchResult] = []
+    private(set) var lastQuery: [Float] = []
 
     func search(query: [Float], limit: Int) async throws -> [VectorSearchResult] {
-        resultsToReturn
+        lastQuery = query
+        return resultsToReturn
     }
 
     func insert(id: String, embedding: [Float]) async throws {
@@ -301,9 +349,11 @@ actor MockVectorSearchForSuggestion: VectorSearchForSuggestion {
 
 actor MockEmbeddingForSuggestion: EmbeddingProviding {
     private var embeddingToReturn: [Float] = []
+    private(set) var embedCallCount = 0
 
     func embed(text: String, mode: EmbeddingMode = .passage) async throws -> [Float] {
-        embeddingToReturn
+        embedCallCount += 1
+        return embeddingToReturn
     }
 
     func embedBatch(texts: [String], mode: EmbeddingMode = .passage) async throws -> [[Float]] {
@@ -312,6 +362,89 @@ actor MockEmbeddingForSuggestion: EmbeddingProviding {
 
     func setEmbedding(_ embedding: [Float]) {
         embeddingToReturn = embedding
+    }
+}
+
+// MARK: - Mock Cloud Providers
+
+actor MockSuggestionCloudEmbeddingProvider: EmbeddingProvider {
+    private let embedding: [Float]
+    private(set) var embedCallCount = 0
+    private(set) var lastEmbeddedText: String?
+
+    nonisolated let dimensions: Int
+
+    init(embedding: [Float]) {
+        self.embedding = embedding
+        self.dimensions = embedding.count
+    }
+
+    func embed(text: String) async throws -> [Float] {
+        embedCallCount += 1
+        lastEmbeddedText = text
+        return embedding
+    }
+
+    func embedBatch(texts: [String]) async throws -> [[Float]] {
+        texts.map { _ in embedding }
+    }
+}
+
+final class MockSuggestionTextGenerationProvider: TextGenerationProvider, @unchecked Sendable {
+    private let tokens: [String]
+
+    init(tokens: [String]) {
+        self.tokens = tokens
+    }
+
+    func generate(
+        prompt: String,
+        systemPrompt: String,
+        maxTokens: Int,
+        temperature: Double
+    ) -> AsyncThrowingStream<String, Error> {
+        let tokens = self.tokens
+        return AsyncThrowingStream { continuation in
+            for token in tokens {
+                continuation.yield(token)
+            }
+            continuation.finish()
+        }
+    }
+}
+
+final class MockSuggestionProviderResolver: RAGProviderResolving, @unchecked Sendable {
+    private let embeddingProvider: any EmbeddingProvider
+    private let textGenerationProvider: any TextGenerationProvider
+    private let embeddingProviderId: String
+
+    init(
+        embeddingProvider: any EmbeddingProvider,
+        textGenerationProvider: any TextGenerationProvider,
+        embeddingProviderId: String
+    ) {
+        self.embeddingProvider = embeddingProvider
+        self.textGenerationProvider = textGenerationProvider
+        self.embeddingProviderId = embeddingProviderId
+    }
+
+    func activeTextGenProvider() -> any TextGenerationProvider {
+        textGenerationProvider
+    }
+
+    func activeEmbeddingProvider() -> any EmbeddingProvider {
+        embeddingProvider
+    }
+
+    func selectedProviderId(for capability: ProviderCapability) -> String {
+        switch capability {
+        case .embedding:
+            return embeddingProviderId
+        case .textGeneration:
+            return "openrouter"
+        case .speechToText, .vision, .textToSpeech:
+            return "local"
+        }
     }
 }
 

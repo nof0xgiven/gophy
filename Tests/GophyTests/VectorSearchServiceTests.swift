@@ -50,6 +50,20 @@ final class VectorSearchServiceTests: XCTestCase {
         XCTAssertLessThan(results[1].distance, results[2].distance)
     }
 
+    func testAutoDetectsOpenAIEmbeddingDimension() async throws {
+        let id = "openai-small-chunk"
+        var embedding = [Float](repeating: 0.0, count: 1536)
+        embedding[42] = 1.0
+
+        try await service.insert(id: id, embedding: embedding)
+
+        let results = try await service.search(query: embedding, limit: 1)
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0].id, id)
+        XCTAssertEqual(results[0].distance, 0.0, accuracy: 0.001)
+    }
+
     func testCosineSimilarityRankingCorrect() async throws {
         let id1 = "chunk-1"
         var embedding1 = [Float](repeating: 0.0, count: 768)

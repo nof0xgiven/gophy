@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")"
 
@@ -13,12 +13,21 @@ if [ ! -f "Secrets.xcconfig" ]; then
 fi
 
 echo "Building with xcodebuild..."
-xcodebuild \
+mkdir -p .build
+BUILD_LOG=".build/xcodebuild.log"
+
+if ! xcodebuild \
     -scheme Gophy \
     -configuration Debug \
     -destination 'platform=macOS' \
     -derivedDataPath .build/xcode \
-    build 2>&1 | grep -E "(error:|warning:|\*\* BUILD)" | tail -20
+    build >"$BUILD_LOG" 2>&1; then
+    grep -E "(error:|warning:|\*\* BUILD)" "$BUILD_LOG" | tail -40 || tail -40 "$BUILD_LOG"
+    echo "xcodebuild failed; full log: $BUILD_LOG" >&2
+    exit 1
+fi
+
+grep -E "(error:|warning:|\*\* BUILD)" "$BUILD_LOG" | tail -20 || true
 
 echo "Build completed, creating app bundle..."
 

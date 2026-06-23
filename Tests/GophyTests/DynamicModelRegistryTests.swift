@@ -105,6 +105,63 @@ struct DynamicModelRegistryTests {
         #expect(isDownloaded == true || isDownloaded == false, "Should return valid boolean")
     }
 
+    @Test("isDownloaded finds safetensors nested inside HuggingFace snapshot directories")
+    func testIsDownloadedFindsNestedSnapshotArtifacts() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GophyDynamicModelRegistryTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let storageManager = StorageManager(baseDirectory: tempDirectory)
+        let registry = DynamicModelRegistry(storageManager: storageManager)
+
+        let model = try #require(
+            registry.availableModels().first { $0.huggingFaceID == "BAAI/bge-large-en-v1.5" }
+        )
+        let snapshotDirectory = registry
+            .downloadPath(for: model)
+            .appendingPathComponent("snapshots")
+            .appendingPathComponent("abc123")
+        try FileManager.default.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+        try Data([0x01]).write(to: snapshotDirectory.appendingPathComponent("model.safetensors"))
+
+        #expect(registry.isDownloaded(model), "Nested HuggingFace snapshot weights should count as downloaded")
+    }
+
+    @Test("isDownloaded finds loadable artifacts left in Hub's nested cache layout")
+    func testIsDownloadedFindsHubCacheArtifacts() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GophyDynamicModelRegistryTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let storageManager = StorageManager(baseDirectory: tempDirectory)
+        let registry = DynamicModelRegistry(storageManager: storageManager)
+
+        let model = try #require(
+            registry.availableModels().first { $0.huggingFaceID == "BAAI/bge-large-en-v1.5" }
+        )
+        let hubSnapshotDirectory = storageManager.modelsDirectory
+            .appendingPathComponent("models")
+            .appendingPathComponent("BAAI")
+            .appendingPathComponent("bge-large-en-v1.5")
+            .appendingPathComponent("snapshots")
+            .appendingPathComponent("abc123")
+        try FileManager.default.createDirectory(at: hubSnapshotDirectory, withIntermediateDirectories: true)
+        try Data([0x01]).write(to: hubSnapshotDirectory.appendingPathComponent("model.safetensors"))
+
+        #expect(registry.isDownloaded(model), "Hub cache snapshot weights should count as downloaded")
+    }
+
+    @Test("bge-m3 is marked unsupported because it has no safetensors weights for MLX")
+    func testBgeM3IsNotDownloadable() async throws {
+        let registry = DynamicModelRegistry()
+        let model = try #require(
+            registry.availableModels().first { $0.huggingFaceID == "BAAI/bge-m3" }
+        )
+
+        #expect(!model.isDownloadable)
+        #expect(model.downloadDisabledReason?.contains("safetensors") == true)
+    }
+
     @Test("downloadPath returns valid URL")
     func testDownloadPath() async throws {
         let registry = DynamicModelRegistry()

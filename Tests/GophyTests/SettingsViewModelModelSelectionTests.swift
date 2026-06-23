@@ -182,6 +182,56 @@ struct SettingsViewModelModelSelectionTests {
         }
     }
 
+    @Test("OpenRouter is selectable for embeddings when configured")
+    func testOpenRouterSelectableForEmbeddingsWhenConfigured() async throws {
+        let audioManager = AudioDeviceManager()
+        let storageManager = StorageManager.shared
+        let registry = DynamicModelRegistry()
+        let keychain = SettingsViewModelTestKeychain()
+        try keychain.save(apiKey: "sk-test", for: "openrouter")
+
+        let viewModel = SettingsViewModel(
+            audioDeviceManager: audioManager,
+            storageManager: storageManager,
+            registry: registry,
+            keychainService: keychain
+        )
+
+        let embeddingProviders = viewModel.configuredProviderConfigs(for: .embedding)
+        #expect(embeddingProviders.contains { $0.id == "openrouter" })
+
+        let defaultModelId = viewModel.availableCloudModels(for: .embedding, providerId: "openrouter").first?.id ?? ""
+        viewModel.selectCloudProvider(for: .embedding, providerId: "openrouter", modelId: defaultModelId)
+
+        #expect(viewModel.selectedProviderIdFor(.embedding) == "openrouter")
+        #expect(viewModel.selectedModelIdFor(.embedding).contains("embedding"))
+    }
+
+    @Test("OpenRouter is selectable for vision when configured")
+    func testOpenRouterSelectableForVisionWhenConfigured() async throws {
+        let audioManager = AudioDeviceManager()
+        let storageManager = StorageManager.shared
+        let registry = DynamicModelRegistry()
+        let keychain = SettingsViewModelTestKeychain()
+        try keychain.save(apiKey: "sk-test", for: "openrouter")
+
+        let viewModel = SettingsViewModel(
+            audioDeviceManager: audioManager,
+            storageManager: storageManager,
+            registry: registry,
+            keychainService: keychain
+        )
+
+        let visionProviders = viewModel.configuredProviderConfigs(for: .vision)
+        #expect(visionProviders.contains { $0.id == "openrouter" })
+
+        let defaultModelId = viewModel.availableCloudModels(for: .vision, providerId: "openrouter").first?.id ?? ""
+        viewModel.selectCloudProvider(for: .vision, providerId: "openrouter", modelId: defaultModelId)
+
+        #expect(viewModel.selectedProviderIdFor(.vision) == "openrouter")
+        #expect(!viewModel.selectedModelIdFor(.vision).isEmpty)
+    }
+
     @Test("System audio defaults to enabled for new users")
     func testSystemAudioDefaultsToEnabled() async throws {
         let defaults = UserDefaults.standard
@@ -226,5 +276,34 @@ struct SettingsViewModelModelSelectionTests {
         #expect(defaults.object(forKey: "systemAudioEnabled") as? Bool == true, "System audio setting should persist true")
 
         defaults.removeObject(forKey: "systemAudioEnabled")
+    }
+}
+
+private final class SettingsViewModelTestKeychain: KeychainServiceProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String] = [:]
+
+    func save(apiKey: String, for providerId: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        values[providerId] = apiKey
+    }
+
+    func retrieve(for providerId: String) throws -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[providerId]
+    }
+
+    func delete(for providerId: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        values.removeValue(forKey: providerId)
+    }
+
+    func listProviderIds() throws -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(values.keys)
     }
 }

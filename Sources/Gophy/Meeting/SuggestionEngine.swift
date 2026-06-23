@@ -59,7 +59,7 @@ private final class TextGenProviderAdapter: TextGenerationProvider, @unchecked S
 
 public actor SuggestionEngine {
     private let textGenProvider: (any TextGenerationProvider)?
-    private let providerRegistry: ProviderRegistry?
+    private let providerRegistry: (any RAGProviderResolving)?
     private let vectorSearchService: any VectorSearchForSuggestion
     private let embeddingEngine: any EmbeddingProviding
     private let meetingRepository: any MeetingRepositoryProtocol
@@ -90,9 +90,20 @@ public actor SuggestionEngine {
         return textGenProvider!
     }
 
+    /// Resolve suggestion retrieval embeddings from the active cloud embedding provider when selected.
+    /// Keep local embeddings on the mode-aware engine so local E5-style query prefixes are preserved.
+    private func embedQuery(_ text: String) async throws -> [Float] {
+        if let registry = providerRegistry,
+           registry.selectedProviderId(for: .embedding) != "local" {
+            return try await registry.activeEmbeddingProvider().embed(text: text)
+        }
+
+        return try await embeddingEngine.embed(text: text, mode: .query)
+    }
+
     /// Initialize with a ProviderRegistry (preferred — enables dynamic provider switching)
     public init(
-        providerRegistry: ProviderRegistry,
+        providerRegistry: any RAGProviderResolving,
         vectorSearchService: any VectorSearchForSuggestion,
         embeddingEngine: any EmbeddingProviding,
         meetingRepository: any MeetingRepositoryProtocol,
@@ -286,7 +297,7 @@ public actor SuggestionEngine {
         let combinedText = transcript.map { $0.text }.joined(separator: " ")
 
         // Embed query
-        let queryEmbedding = try await embeddingEngine.embed(text: combinedText, mode: .query)
+        let queryEmbedding = try await embedQuery(combinedText)
 
         // Search for similar segments and chunks
         let searchResults = try await vectorSearchService.search(query: queryEmbedding, limit: 5)

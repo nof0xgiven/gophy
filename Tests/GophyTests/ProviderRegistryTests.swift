@@ -171,6 +171,13 @@ struct ProviderRegistryTests {
         #expect(embedding is OpenAICompatibleProvider)
     }
 
+    @Test("embedding dimensions are inferred for OpenRouter embedding models")
+    func testEmbeddingDimensionsInference() {
+        #expect(ProviderRegistry.embeddingDimensions(for: "openai/text-embedding-3-small") == 1536)
+        #expect(ProviderRegistry.embeddingDimensions(for: "openai/text-embedding-3-large") == 3072)
+        #expect(ProviderRegistry.embeddingDimensions(for: "baai/bge-m3") == 1024)
+    }
+
     @Test("activeSTTProvider returns configured cloud provider")
     func testActiveSTTProvider() async throws {
         let keychain = MockKeychainForRegistry()

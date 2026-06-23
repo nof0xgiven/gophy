@@ -188,7 +188,7 @@ public final class ModeController: @unchecked Sendable {
 
         // Only load embedding engine if using local provider and model is downloaded
         let selectedEmbeddingId = UserDefaults.standard.string(forKey: "selectedEmbeddingModelId") ?? "multilingual-e5-small"
-        let embeddingModels = modelRegistry.availableModels().filter { $0.type == .embedding }
+        let embeddingModels = modelRegistry.availableModels().filter { $0.type == .embedding && $0.isDownloadable }
         let embeddingModel = embeddingModels.first(where: { $0.id == selectedEmbeddingId })
             ?? embeddingModels.first
 

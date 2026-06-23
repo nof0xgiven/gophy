@@ -10,6 +10,7 @@ struct ChatView: View {
     @State private var database: GophyDatabase?
     @State private var chatListViewModel: ChatListViewModel?
     @State private var selectedChatId: String?
+    @State private var initError: String?
 
     init(initialChatId: String? = nil) {
         self.initialChatId = initialChatId
@@ -30,6 +31,8 @@ struct ChatView: View {
                         emptySelectionView
                     }
                 }
+            } else if let initError {
+                loadErrorView(message: initError)
             } else {
                 SwiftUI.ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -68,8 +71,28 @@ struct ChatView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    private func loadErrorView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 48))
+                .foregroundStyle(.orange)
+
+            Text("Chat Unavailable")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
     private func initialize() async {
-        guard database == nil else { return }
+        guard database == nil, initError == nil else { return }
 
         do {
             let storageManager = StorageManager()
@@ -88,6 +111,7 @@ struct ChatView: View {
             }
         } catch {
             logger.error("Failed to initialize ChatView: \(error.localizedDescription, privacy: .public)")
+            initError = "Failed to initialize chat: \(error.localizedDescription)"
         }
     }
 }

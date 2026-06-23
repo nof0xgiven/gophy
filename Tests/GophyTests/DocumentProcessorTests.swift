@@ -23,11 +23,19 @@ final class MockOCREngineProvider: OCREngineProviding, @unchecked Sendable {
 final class MockEmbeddingPipelineProvider: EmbeddingPipelineProviding, @unchecked Sendable {
     var indexDocumentCalled = false
     var lastIndexedDocumentId: String?
+    var errorToThrow: Error?
 
     func indexDocument(documentId: String) async throws {
         indexDocumentCalled = true
         lastIndexedDocumentId = documentId
+        if let errorToThrow {
+            throw errorToThrow
+        }
     }
+}
+
+private enum TestEmbeddingIndexError: Error {
+    case unavailable
 }
 
 final class DocumentProcessorTests: XCTestCase {
@@ -249,6 +257,22 @@ final class DocumentProcessorTests: XCTestCase {
 
         XCTAssertTrue(mockPipeline.indexDocumentCalled)
         XCTAssertEqual(mockPipeline.lastIndexedDocumentId, document.id)
+    }
+
+    func testDocumentProcessingStillCompletesWhenOptionalEmbeddingIndexingFails() async throws {
+        mockPipeline.errorToThrow = TestEmbeddingIndexError.unavailable
+        let content = "Content should still be stored even when vector indexing is unavailable"
+        let testFile = tempDirectory.appendingPathComponent("index-unavailable.txt")
+        try content.write(to: testFile, atomically: true, encoding: .utf8)
+
+        let document = try await processor.process(fileURL: testFile)
+        let persistedDocument = try await documentRepository.get(id: document.id)
+        let chunks = try await documentRepository.getChunks(documentId: document.id)
+
+        XCTAssertEqual(document.status, "ready")
+        XCTAssertEqual(persistedDocument?.status, "ready")
+        XCTAssertGreaterThan(chunks.count, 0)
+        XCTAssertTrue(mockPipeline.indexDocumentCalled)
     }
 
     func testMultipleChunksHaveCorrectPageNumbers() async throws {

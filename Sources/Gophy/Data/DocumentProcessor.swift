@@ -1,6 +1,9 @@
 import Foundation
 import PDFKit
 import AppKit
+import os
+
+private let documentProcessorLogger = Logger(subsystem: "com.gophy.app", category: "DocumentProcessor")
 
 public protocol OCREngineProviding: Sendable {
     func extractText(from fileURL: URL) async throws -> String
@@ -116,7 +119,11 @@ public final class DocumentProcessor: Sendable {
 
             try await documentRepository.updateStatus(id: documentId, status: "ready")
 
-            try await embeddingPipeline.indexDocument(documentId: documentId)
+            do {
+                try await embeddingPipeline.indexDocument(documentId: documentId)
+            } catch {
+                documentProcessorLogger.warning("Document \(documentId, privacy: .public) processed without vector indexing: \(error.localizedDescription, privacy: .public)")
+            }
 
             return updatedDocument
         } catch {

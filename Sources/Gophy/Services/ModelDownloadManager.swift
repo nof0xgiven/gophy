@@ -33,6 +33,22 @@ public final class ModelDownloadManager: @unchecked Sendable {
     public func download(_ model: ModelDefinition) -> AsyncStream<DownloadProgress> {
         logger.info("Download requested for model: \(model.id), type: \(model.type.rawValue)")
 
+        guard model.isDownloadable else {
+            logger.warning("Model \(model.id) is not downloadable: \(model.downloadDisabledReason ?? "No reason provided")")
+            return AsyncStream { continuation in
+                continuation.yield(DownloadProgress(
+                    model: model,
+                    bytesDownloaded: 0,
+                    totalBytes: 0,
+                    status: .failed(ModelDownloadError.unsupportedModel(
+                        modelId: model.id,
+                        reason: model.downloadDisabledReason ?? "This model is not compatible with the local loader."
+                    ))
+                ))
+                continuation.finish()
+            }
+        }
+
         if registry.isDownloaded(model) {
             logger.info("Model already downloaded, returning completed status")
             return AsyncStream { continuation in
@@ -63,6 +79,19 @@ public final class ModelDownloadManager: @unchecked Sendable {
                     let downloadStream = selectedDownloader.download(model: model, to: destination)
 
                     for await progress in downloadStream {
+                        if case .completed = progress.status, !self.registry.isDownloaded(model) {
+                            logger.error("Downloader completed but model artifacts are unavailable for \(model.id) at \(destination.path)")
+                            continuation.yield(DownloadProgress(
+                                model: model,
+                                bytesDownloaded: progress.bytesDownloaded,
+                                totalBytes: progress.totalBytes,
+                                status: .failed(ModelDownloadError.downloadedModelUnavailable(modelId: model.id, path: destination.path))
+                            ))
+                            self.removeActiveDownload(for: model)
+                            continuation.finish()
+                            return
+                        }
+
                         continuation.yield(progress)
 
                         if progress.status.isTerminal {
@@ -151,6 +180,8 @@ public enum ModelDownloadError: Error, LocalizedError {
     case insufficientDiskSpace(required: Int64, available: Int64)
     case downloadFailed(underlying: Error)
     case invalidDestination
+    case downloadedModelUnavailable(modelId: String, path: String)
+    case unsupportedModel(modelId: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -162,6 +193,10 @@ public enum ModelDownloadError: Error, LocalizedError {
             return "Download failed: \(error.localizedDescription)"
         case .invalidDestination:
             return "Invalid download destination"
+        case .downloadedModelUnavailable(let modelId, let path):
+            return "Downloaded model \(modelId) was not usable at \(path). Expected loadable model artifacts."
+        case .unsupportedModel(let modelId, let reason):
+            return "\(modelId) is not downloadable in Gophy. \(reason)"
         }
     }
 }
