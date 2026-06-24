@@ -22,7 +22,10 @@ struct MeetingContainerView: View {
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") {
-                                onDismiss()
+                                Task {
+                                    await viewModel.prepareForDismissal()
+                                    onDismiss()
+                                }
                             }
                         }
                     }

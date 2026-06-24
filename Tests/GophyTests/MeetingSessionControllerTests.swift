@@ -227,6 +227,10 @@ final class MeetingSessionControllerTests: XCTestCase {
 
         try await controller.resume()
 
+        // System audio marks its mock capture as started from a task spawned by
+        // its nonisolated start method.
+        try await Task.sleep(nanoseconds: 10_000_000)
+
         let micStarted = await mockMicrophoneCapture.isStarted
         let sysStarted = await mockSystemAudioCapture.isStarted
         XCTAssertTrue(micStarted)

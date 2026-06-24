@@ -50,7 +50,7 @@ public final class TranscriptionEngine: @unchecked Sendable {
             transcriptionLogger.info("Result has \(result.segments.count, privacy: .public) segments")
             return result.segments.compactMap { segment -> TranscriptionSegment? in
                 let cleanedText = cleanWhisperText(segment.text)
-                transcriptionLogger.info("Segment: \"\(cleanedText, privacy: .public)\"")
+                transcriptionLogger.info("Segment cleaned, characters=\(cleanedText.count, privacy: .public)")
 
                 // Skip empty segments after cleaning
                 guard !cleanedText.isEmpty else {

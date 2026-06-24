@@ -147,6 +147,17 @@ private func makeEvent(
 
 @Suite("MeetingAutoStartService Tests")
 struct MeetingAutoStartServiceTests {
+    @Test("UserDefaults auto-start defaults disabled until user opts in")
+    func testUserDefaultsAutoStartDefaultsDisabled() {
+        let suiteName = "GophyMeetingAutoStartServiceTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = UserDefaultsAutoStartSettings(defaults: defaults)
+
+        #expect(settings.autoStartEnabled == false)
+    }
 
     @Test("Auto-start triggers recording at configured time before meeting")
     func testAutoStartTriggersAtLeadTime() async throws {

@@ -40,7 +40,7 @@ final class UserNotificationAutoStartNotifier: AutoStartNotifierProtocol, @unche
     func notifyAndWait(title: String) async -> AutoStartAction {
         let content = UNMutableNotificationContent()
         content.title = "Meeting Starting Soon"
-        content.body = "'\(title)' is about to begin. Recording will start automatically."
+        content.body = "'\(title)' is about to begin. Open Gophy and start recording when you're ready."
         content.sound = .default
         content.categoryIdentifier = "MEETING_AUTO_START"
 
@@ -56,9 +56,9 @@ final class UserNotificationAutoStartNotifier: AutoStartNotifierProtocol, @unche
             logger.warning("Failed to show notification: \(error.localizedDescription, privacy: .public)")
         }
 
-        // Wait 30 seconds for user to dismiss (simplified: always start)
+        // Notification delivery is not consent to record audio.
         try? await Task.sleep(nanoseconds: 5_000_000_000)
-        return .startRecording
+        return .skip
     }
 }
 
@@ -77,7 +77,7 @@ final class UserDefaultsAutoStartSettings: AutoStartSettingsProtocol, @unchecked
         defer { lock.unlock() }
         let key = "calendarAutoStartEnabled"
         if defaults.object(forKey: key) == nil {
-            return true
+            return false
         }
         return defaults.bool(forKey: key)
     }

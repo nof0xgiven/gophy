@@ -111,12 +111,22 @@ public final class VectorSearchService: Sendable {
     }
 
     public func search(query: [Float], limit: Int) async throws -> [VectorSearchResult] {
+        guard try await count() > 0 else {
+            return []
+        }
+
         if _embeddingDimension > 0 {
             guard query.count == _embeddingDimension else {
                 throw VectorSearchError.invalidEmbeddingDimension(expected: _embeddingDimension, got: query.count)
             }
         } else {
-            try await ensureDimension(query.count)
+            let currentDim = try await detectTableDimension()
+            guard currentDim > 0 else {
+                return []
+            }
+            guard query.count == currentDim else {
+                throw VectorSearchError.invalidEmbeddingDimension(expected: currentDim, got: query.count)
+            }
         }
 
         let queryBlob = query.withUnsafeBytes { Data($0) }

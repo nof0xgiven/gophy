@@ -56,7 +56,7 @@ final class SuggestionEngineTests: XCTestCase {
             "seg2",
             TranscriptSegmentRecord(
                 id: "seg2",
-                meetingId: "meeting0",
+                meetingId: "meeting1",
                 text: "Last quarter we achieved 20% growth",
                 speaker: "Others",
                 startTime: 0.0,
@@ -68,7 +68,7 @@ final class SuggestionEngineTests: XCTestCase {
             "seg3",
             TranscriptSegmentRecord(
                 id: "seg3",
-                meetingId: "meeting0",
+                meetingId: "meeting1",
                 text: "Focus on customer retention metrics",
                 speaker: "You",
                 startTime: 10.0,
@@ -89,6 +89,58 @@ final class SuggestionEngineTests: XCTestCase {
         XCTAssertEqual(savedMessage.role, "assistant")
         XCTAssertEqual(savedMessage.content, "Based on past results, focus on growth metrics")
         XCTAssertEqual(savedMessage.meetingId, "meeting1")
+    }
+
+    func testSuggestionRAGExcludesOtherMeetingsAndUnallowedDocuments() async throws {
+        await mockMeetingRepo.setTranscript(for: "meeting1", segments: [
+            TranscriptSegmentRecord(
+                id: "seg1",
+                meetingId: "meeting1",
+                text: "Discuss the launch plan",
+                speaker: "You",
+                startTime: 0.0,
+                endTime: 5.0,
+                createdAt: Date()
+            )
+        ])
+
+        await mockEmbedding.setEmbedding(Array(repeating: 0.1, count: 768))
+        await mockVectorSearch.setResults([
+            VectorSearchResult(id: "other-meeting-segment", distance: 0.1),
+            VectorSearchResult(id: "unallowed-document-chunk", distance: 0.2)
+        ])
+        await mockMeetingRepo.setSegment(
+            "other-meeting-segment",
+            TranscriptSegmentRecord(
+                id: "other-meeting-segment",
+                meetingId: "meeting0",
+                text: "Confidential acquisition discussion",
+                speaker: "Others",
+                startTime: 0.0,
+                endTime: 4.0,
+                createdAt: Date()
+            )
+        )
+        await mockDocumentRepo.setChunk(
+            "unallowed-document-chunk",
+            DocumentChunkRecord(
+                id: "unallowed-document-chunk",
+                documentId: "doc-private",
+                content: "Private board memo",
+                chunkIndex: 0,
+                pageNumber: 1,
+                createdAt: Date()
+            )
+        )
+        await mockTextGen.setTokens(["Scoped", " suggestion"])
+
+        _ = try await engine.generateSuggestion(meetingId: "meeting1")
+
+        let prompt = await mockTextGen.lastPrompt
+        XCTAssertNotNil(prompt)
+        XCTAssertFalse(prompt?.contains("Confidential acquisition discussion") ?? true)
+        XCTAssertFalse(prompt?.contains("Private board memo") ?? true)
+        XCTAssertTrue(prompt?.contains("Discuss the launch plan") ?? false)
     }
 
     func testManualTriggerOnDemand() async throws {
@@ -199,7 +251,7 @@ final class SuggestionEngineTests: XCTestCase {
         XCTAssertEqual(savedMessages.count, 0)
     }
 
-    func testRAGContextIncludesDocumentChunks() async throws {
+    func testRAGContextIncludesExplicitlyAllowedDocumentChunks() async throws {
         // Set up transcript
         await mockMeetingRepo.setTranscript(for: "meeting1", segments: [
             TranscriptSegmentRecord(
@@ -244,10 +296,22 @@ final class SuggestionEngineTests: XCTestCase {
         )
 
         await mockTextGen.setTokens(["Combined", " context"])
+        engine = SuggestionEngine(
+            textGenerationEngine: mockTextGen,
+            vectorSearchService: mockVectorSearch,
+            embeddingEngine: mockEmbedding,
+            meetingRepository: mockMeetingRepo,
+            documentRepository: mockDocumentRepo,
+            chatMessageRepository: mockChatRepo,
+            allowedDocumentIds: ["doc1"],
+            autoTriggerInterval: 30.0
+        )
 
         let suggestion = try await engine.generateSuggestion(meetingId: "meeting1")
 
         XCTAssertEqual(suggestion, "Combined context")
+        let prompt = await mockTextGen.lastPrompt
+        XCTAssertTrue(prompt?.contains("Q3 product features include AI integration") ?? false)
     }
 
     func testCloudEmbeddingProviderUsedForSuggestionRetrievalWhenSelected() async throws {
@@ -302,6 +366,7 @@ final class SuggestionEngineTests: XCTestCase {
 actor MockTextGenerationForSuggestion: TextGenerationForSuggestion {
     nonisolated var isLoaded: Bool { true }
     private var tokensToGenerate: [String] = []
+    private(set) var lastPrompt: String?
 
     func load() async throws {
         // No-op
@@ -315,6 +380,7 @@ actor MockTextGenerationForSuggestion: TextGenerationForSuggestion {
         let capturedSelf = self
         return AsyncStream { continuation in
             Task { @Sendable in
+                await capturedSelf.setLastPrompt(prompt)
                 let tokens = await capturedSelf.getTokens()
                 for token in tokens {
                     continuation.yield(token)
@@ -330,6 +396,10 @@ actor MockTextGenerationForSuggestion: TextGenerationForSuggestion {
 
     private func getTokens() -> [String] {
         tokensToGenerate
+    }
+
+    private func setLastPrompt(_ prompt: String) {
+        lastPrompt = prompt
     }
 }
 

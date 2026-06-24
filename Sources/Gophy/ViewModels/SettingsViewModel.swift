@@ -98,7 +98,7 @@ public final class SettingsViewModel {
     var googleUserEmail: String?
     var isSigningIn: Bool = false
     var calendarErrorMessage: String?
-    var calendarAutoStartEnabled: Bool = true
+    var calendarAutoStartEnabled: Bool = false
     var calendarAutoStartOnlyVideo: Bool = true
     var calendarAutoStartLeadTime: Double = 60.0
     var calendarSyncInterval: Double = 300.0

@@ -161,6 +161,26 @@ final class VectorSearchServiceTests: XCTestCase {
         XCTAssertEqual(results.count, 0)
     }
 
+    func testSearchWithMismatchedDimensionDoesNotRecreateExistingIndex() async throws {
+        let id = "chunk-1"
+        let embedding = [Float](repeating: 1.0, count: 768)
+        try await service.insert(id: id, embedding: embedding)
+
+        do {
+            _ = try await service.search(query: [Float](repeating: 0.5, count: 1536), limit: 10)
+            XCTFail("Expected mismatched read-path query to be rejected")
+        } catch VectorSearchError.invalidEmbeddingDimension(let expected, let got) {
+            XCTAssertEqual(expected, 768)
+            XCTAssertEqual(got, 1536)
+        }
+
+        let count = try await service.count()
+        XCTAssertEqual(count, 1)
+
+        let results = try await service.search(query: embedding, limit: 10)
+        XCTAssertEqual(results.map(\.id), [id])
+    }
+
     func testInsert100RandomVectorsSearchReturnsClosestMatch() async throws {
         var targetEmbedding = [Float](repeating: 0.0, count: 768)
         targetEmbedding[0] = 1.0
