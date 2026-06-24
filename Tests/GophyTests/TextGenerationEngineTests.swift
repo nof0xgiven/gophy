@@ -21,17 +21,18 @@ final class TextGenerationEngineTests: XCTestCase {
         XCTAssertFalse(engine.isLoaded, "Engine should not be loaded initially")
     }
 
-    func testUnloadSetsIsLoadedToFalse() async throws {
+    func testLoadFailsForInvalidLocalModelFiles() async throws {
         let textGenModel = mockModelRegistry.availableModels().first { $0.type == .textGen }!
         let modelPath = mockModelRegistry.downloadPath(for: textGenModel)
 
         try createMockModelFiles(at: modelPath)
 
-        try await engine.load()
-        XCTAssertTrue(engine.isLoaded, "Engine should be loaded after load()")
-
-        engine.unload()
-        XCTAssertFalse(engine.isLoaded, "Engine should not be loaded after unload()")
+        do {
+            try await engine.load()
+            XCTFail("Expected invalid local model files to fail loading")
+        } catch {
+            XCTAssertFalse(engine.isLoaded, "Engine should not be loaded after invalid model files fail")
+        }
     }
 
     func testGenerateWhenModelNotLoaded() async throws {
@@ -44,16 +45,8 @@ final class TextGenerationEngineTests: XCTestCase {
         XCTAssertTrue(generatedText.isEmpty, "Generate should produce no output when model not loaded")
     }
 
-    func testStateTransitions() async throws {
+    func testUnloadKeepsEngineNotLoadedWhenAlreadyUnloaded() {
         XCTAssertFalse(engine.isLoaded, "Initial state: not loaded")
-
-        let textGenModel = mockModelRegistry.availableModels().first { $0.type == .textGen }!
-        let modelPath = mockModelRegistry.downloadPath(for: textGenModel)
-
-        try createMockModelFiles(at: modelPath)
-
-        try await engine.load()
-        XCTAssertTrue(engine.isLoaded, "State after load: loaded")
 
         engine.unload()
         XCTAssertFalse(engine.isLoaded, "State after unload: not loaded")

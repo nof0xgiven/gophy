@@ -53,18 +53,37 @@ struct CalendarMeetingsView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: playbackMeeting?.id)
         .task {
+            presentPendingAutoStartIfNeeded()
             await initializeViewModel()
             presentPendingAutoStartIfNeeded()
         }
         .onChange(of: navigationCoordinator.pendingAutoStart) { _, newValue in
             presentPendingAutoStartIfNeeded()
         }
+        .sheet(item: $activeSheet) { sheet in
+            sheetContent(sheet)
+        }
+        .fileImporter(
+            isPresented: Binding(
+                get: { viewModel?.showImportRecording ?? false },
+                set: { viewModel?.showImportRecording = $0 }
+            ),
+            allowedContentTypes: [.audio, .movie, .video, .mpeg4Movie, .quickTimeMovie],
+            allowsMultipleSelection: false
+        ) { result in
+            guard let viewModel else { return }
+            handleImportResult(result, viewModel: viewModel)
+        }
     }
 
     private func presentPendingAutoStartIfNeeded() {
-        if navigationCoordinator.pendingAutoStart != nil {
-            activeSheet = .newMeetingForEvent
+        if let destination = Self.initialSheetDestination(for: navigationCoordinator.pendingAutoStart) {
+            activeSheet = destination
         }
+    }
+
+    static func initialSheetDestination(for autoStart: AutoStartRequest?) -> SheetDestination? {
+        autoStart == nil ? nil : .newMeetingForEvent
     }
 
     private func openMeeting(_ meeting: MeetingRecord) {
@@ -176,9 +195,13 @@ struct CalendarMeetingsView: View {
         } message: { meeting in
             Text("Are you sure you want to delete '\(meeting.title)'? This action cannot be undone.")
         }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .meetingDetail(let meeting):
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: SheetDestination) -> some View {
+        switch sheet {
+        case .meetingDetail(let meeting):
+            if let viewModel {
                 MeetingDetailView(
                     viewModel: MeetingDetailViewModel(
                         meeting: meeting,
@@ -186,51 +209,61 @@ struct CalendarMeetingsView: View {
                         chatMessageRepository: viewModel.chatMessageRepository
                     )
                 )
-            case .newMeeting:
-                MeetingContainerView {
+            } else {
+                SwiftUI.ProgressView("Loading...")
+                    .frame(minWidth: 400, minHeight: 240)
+            }
+        case .newMeeting:
+            MeetingContainerView {
+                activeSheet = nil
+                selectedCalendarEvent = nil
+                reloadMeetingsIfReady()
+            }
+        case .newMeetingForEvent:
+            MeetingContainerView(
+                onDismiss: {
                     activeSheet = nil
                     selectedCalendarEvent = nil
-                    Task { await viewModel.loadMeetings() }
-                }
-            case .newMeetingForEvent:
-                MeetingContainerView(
-                    onDismiss: {
-                        activeSheet = nil
-                        selectedCalendarEvent = nil
-                        navigationCoordinator.pendingAutoStart = nil
-                        Task { await viewModel.loadMeetings() }
-                    },
-                    autoStartTitle: navigationCoordinator.pendingAutoStart?.title,
-                    autoStartCalendarEventId: navigationCoordinator.pendingAutoStart?.calendarEventId
-                )
-                .onDisappear {
                     navigationCoordinator.pendingAutoStart = nil
-                }
-            case .linkDocument(let meeting):
+                    reloadMeetingsIfReady()
+                },
+                autoStartTitle: navigationCoordinator.pendingAutoStart?.title,
+                autoStartCalendarEventId: navigationCoordinator.pendingAutoStart?.calendarEventId
+            )
+            .onDisappear {
+                navigationCoordinator.pendingAutoStart = nil
+            }
+        case .linkDocument(let meeting):
+            if let viewModel {
                 LinkDocumentSheet(
                     meetingId: meeting.id,
                     meetingTitle: meeting.title,
                     viewModel: viewModel
                 )
+            } else {
+                SwiftUI.ProgressView("Loading...")
+                    .frame(minWidth: 400, minHeight: 240)
             }
         }
-        .fileImporter(
-            isPresented: Bindable(viewModel).showImportRecording,
-            allowedContentTypes: [.audio, .movie, .video, .mpeg4Movie, .quickTimeMovie],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    Task {
-                        let securityScoped = url.startAccessingSecurityScopedResource()
-                        defer { if securityScoped { url.stopAccessingSecurityScopedResource() } }
-                        _ = await viewModel.importRecording(url: url)
-                    }
+    }
+
+    private func reloadMeetingsIfReady() {
+        guard let viewModel else { return }
+        Task { await viewModel.loadMeetings() }
+    }
+
+    private func handleImportResult(_ result: Result<[URL], Error>, viewModel: CalendarMeetingsViewModel) {
+        switch result {
+        case .success(let urls):
+            if let url = urls.first {
+                Task {
+                    let securityScoped = url.startAccessingSecurityScopedResource()
+                    defer { if securityScoped { url.stopAccessingSecurityScopedResource() } }
+                    _ = await viewModel.importRecording(url: url)
                 }
-            case .failure(let error):
-                viewModel.errorMessage = "Import failed: \(error.localizedDescription)"
             }
+        case .failure(let error):
+            viewModel.errorMessage = "Import failed: \(error.localizedDescription)"
         }
     }
 

@@ -48,6 +48,20 @@ final class MeetingStateTrackerTests: XCTestCase {
         viewModel.stop()
     }
 
+    func testAutoShowOverlayIsEnabledByDefault() {
+        UserDefaults.standard.removeObject(forKey: "autoShowOverlay")
+
+        XCTAssertTrue(MeetingStateTracker.shared.shouldAutoShowOverlay)
+    }
+
+    func testAutoShowOverlayHonorsExplicitPreference() {
+        UserDefaults.standard.set(true, forKey: "autoShowOverlay")
+        XCTAssertTrue(MeetingStateTracker.shared.shouldAutoShowOverlay)
+
+        UserDefaults.standard.set(false, forKey: "autoShowOverlay")
+        XCTAssertFalse(MeetingStateTracker.shared.shouldAutoShowOverlay)
+    }
+
     private func resetTracker() async {
         let tracker = MeetingStateTracker.shared
         tracker.startTracking()

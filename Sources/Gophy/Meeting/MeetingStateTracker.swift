@@ -15,7 +15,9 @@ public final class MeetingStateTracker {
 
     private var subscriberTask: Task<Void, Never>?
     private var durationTimer: Timer?
+    private var overlayAutoShowTask: Task<Void, Never>?
     private var meetingStartTime: Date?
+    private let overlayAutoShowDelayNanoseconds: UInt64 = 750_000_000
 
     private init() {}
 
@@ -34,6 +36,8 @@ public final class MeetingStateTracker {
     public func stopTracking() {
         subscriberTask?.cancel()
         subscriberTask = nil
+        overlayAutoShowTask?.cancel()
+        overlayAutoShowTask = nil
         stopDurationTimer()
     }
 
@@ -59,10 +63,10 @@ public final class MeetingStateTracker {
                     meetingStartTime = Date()
                 }
                 startDurationTimer()
-                if UserDefaults.standard.object(forKey: "autoShowOverlay") as? Bool ?? true {
-                    CompactOverlayWindowController.shared.showOverlay()
-                }
+                scheduleOverlayAutoShowIfNeeded()
             case .completed, .idle:
+                overlayAutoShowTask?.cancel()
+                overlayAutoShowTask = nil
                 stopDurationTimer()
                 meetingStartTime = nil
                 duration = 0
@@ -93,6 +97,24 @@ public final class MeetingStateTracker {
     private func stopDurationTimer() {
         durationTimer?.invalidate()
         durationTimer = nil
+    }
+
+    var shouldAutoShowOverlay: Bool {
+        UserDefaults.standard.object(forKey: "autoShowOverlay") as? Bool ?? true
+    }
+
+    private func scheduleOverlayAutoShowIfNeeded() {
+        guard shouldAutoShowOverlay else { return }
+
+        overlayAutoShowTask?.cancel()
+        let delay = overlayAutoShowDelayNanoseconds
+        overlayAutoShowTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self, !Task.isCancelled else { return }
+            guard self.shouldAutoShowOverlay else { return }
+            guard self.status == .active || self.status == .paused else { return }
+            CompactOverlayWindowController.shared.showOverlay()
+        }
     }
 
     public var formattedDuration: String {

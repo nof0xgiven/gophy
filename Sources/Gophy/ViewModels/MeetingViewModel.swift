@@ -49,6 +49,13 @@ public final class MeetingViewModel {
         startListeningToEvents()
     }
 
+    public static func userVisibleErrorMessage(for error: any Error) -> String? {
+        if error is CancellationError {
+            return nil
+        }
+        return error.localizedDescription
+    }
+
     public func startMeeting() async {
         do {
             MeetingStateTracker.shared.setMeetingTitle(title)
@@ -68,7 +75,7 @@ public final class MeetingViewModel {
             status = .idle
             UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
             MeetingStateTracker.shared.setMeetingId(nil)
-            errorMessage = error.localizedDescription
+            errorMessage = Self.userVisibleErrorMessage(for: error)
         }
     }
 
@@ -81,7 +88,7 @@ public final class MeetingViewModel {
             UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
             MeetingStateTracker.shared.setMeetingId(nil)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Self.userVisibleErrorMessage(for: error)
         }
     }
 
@@ -95,7 +102,7 @@ public final class MeetingViewModel {
             try await sessionController.resume(audioConfiguration: currentAudioConfiguration())
             startDurationTimer()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Self.userVisibleErrorMessage(for: error)
         }
     }
 

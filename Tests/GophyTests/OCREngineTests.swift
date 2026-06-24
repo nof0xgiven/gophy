@@ -27,31 +27,31 @@ final class OCREngineTests: XCTestCase {
         }
     }
 
-    func testOCREngineExtractTextThrowsWhenModelNotLoaded() async {
+    func testOCREngineExtractTextThrowsWhenModelNotDownloaded() async {
         let engine = OCREngine()
         let image = createTestImage()
 
         do {
             _ = try await engine.extractText(from: image)
-            XCTFail("Expected OCRError.modelNotLoaded")
-        } catch OCRError.modelNotLoaded {
+            XCTFail("Expected OCRError.modelNotDownloaded")
+        } catch OCRError.modelNotDownloaded {
             XCTAssertTrue(true)
         } catch {
-            XCTFail("Expected OCRError.modelNotLoaded but got \(error)")
+            XCTFail("Expected OCRError.modelNotDownloaded but got \(error)")
         }
     }
 
-    func testOCREngineExtractTextFromCGImageThrowsWhenModelNotLoaded() async {
+    func testOCREngineExtractTextFromCGImageThrowsWhenModelNotDownloaded() async {
         let engine = OCREngine()
         let cgImage = createTestCGImage()
 
         do {
             _ = try await engine.extractText(from: cgImage)
-            XCTFail("Expected OCRError.modelNotLoaded")
-        } catch OCRError.modelNotLoaded {
+            XCTFail("Expected OCRError.modelNotDownloaded")
+        } catch OCRError.modelNotDownloaded {
             XCTAssertTrue(true)
         } catch {
-            XCTFail("Expected OCRError.modelNotLoaded but got \(error)")
+            XCTFail("Expected OCRError.modelNotDownloaded but got \(error)")
         }
     }
 

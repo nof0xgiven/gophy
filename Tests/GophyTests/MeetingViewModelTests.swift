@@ -59,6 +59,10 @@ final class MeetingViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.suggestions.isEmpty)
     }
 
+    func testCancellationErrorDoesNotCreateUserVisibleError() {
+        XCTAssertNil(MeetingViewModel.userVisibleErrorMessage(for: CancellationError()))
+    }
+
     private func seedSuggestion(id: String) async throws -> ChatMessageRecord {
         let meeting = MeetingRecord(
             id: "meeting-1",
