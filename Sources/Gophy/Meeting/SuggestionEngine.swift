@@ -90,6 +90,11 @@ public actor SuggestionEngine {
         return textGenProvider!
     }
 
+    /// Expose the active text generation provider for quick ask
+    public func activeTextGenProviderForQuickAsk() -> any TextGenerationProvider {
+        return activeTextGenProvider
+    }
+
     /// Resolve suggestion retrieval embeddings from the active cloud embedding provider when selected.
     /// Keep local embeddings on the mode-aware engine so local E5-style query prefixes are preserved.
     private func embedQuery(_ text: String) async throws -> [Float] {
@@ -213,6 +218,43 @@ public actor SuggestionEngine {
         }
     }
 
+    /// Start automatic suggestions with streaming tokens.
+    /// Yields tuples of (suggestionId, token, isComplete) so callers can display
+    /// suggestions being built incrementally.
+    public nonisolated func autoSuggestionStream(
+        meetingId: String,
+        transcriptStream: AsyncStream<TranscriptSegment>
+    ) -> AsyncStream<(String, String, Bool)> {
+        AsyncStream { [weak self] continuation in
+            guard let self = self else {
+                continuation.finish()
+                return
+            }
+
+            Task {
+                var accumulatedDuration: TimeInterval = 0.0
+
+                for await segment in transcriptStream {
+                    let segmentDuration = segment.endTime - segment.startTime
+                    accumulatedDuration += segmentDuration
+
+                    if accumulatedDuration >= self.autoTriggerInterval {
+                        let suggestionId = UUID().uuidString
+                        accumulatedDuration = 0.0
+
+                        let tokenStream = self.generateSuggestionStream(meetingId: meetingId)
+                        for await token in tokenStream {
+                            continuation.yield((suggestionId, token, false))
+                        }
+                        continuation.yield((suggestionId, "", true))
+                    }
+                }
+
+                continuation.finish()
+            }
+        }
+    }
+
     /// Generate a suggestion with streaming tokens
     /// - Parameter meetingId: The meeting to generate a suggestion for
     /// - Returns: AsyncStream of generated tokens
@@ -251,11 +293,13 @@ public actor SuggestionEngine {
                     }
 
                     // Store suggestion as chat message
-                    do {
-                        try await self.storeSuggestion(fullSuggestion, meetingId: meetingId)
-                    } catch {
-                        // Log storage error but don't fail the entire suggestion
-                        print("Error storing suggestion: \(error)")
+                    if !fullSuggestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        do {
+                            try await self.storeSuggestion(fullSuggestion, meetingId: meetingId)
+                        } catch {
+                            // Log storage error but don't fail the entire suggestion
+                            print("Error storing suggestion: \(error)")
+                        }
                     }
 
                     continuation.finish()

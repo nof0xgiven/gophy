@@ -2,10 +2,12 @@ import SwiftUI
 
 @MainActor
 struct SuggestionPanelView: View {
-    let suggestions: [ChatMessageRecord]
+    let suggestions: [SuggestionDisplayItem]
     let isGenerating: Bool
     let onRefresh: () async -> Void
     var ttsPlaybackService: TTSPlaybackService?
+    var onDismiss: ((String) -> Void)?
+    var onFeedback: ((String, String) -> Void)?
 
     @State private var collapsedSuggestions: Set<String> = []
 
@@ -71,12 +73,16 @@ struct SuggestionPanelView: View {
                                 onToggle: {
                                     toggleCollapsed(suggestion.id)
                                 },
-                                ttsPlaybackService: ttsPlaybackService
+                                ttsPlaybackService: ttsPlaybackService,
+                                onDismiss: onDismiss,
+                                onFeedback: onFeedback
                             )
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
                 }
                 .padding(.vertical, 4)
+                .animation(.easeInOut(duration: 0.25), value: suggestions.count)
             }
         }
         .padding()
@@ -95,10 +101,12 @@ struct SuggestionPanelView: View {
 
 @MainActor
 struct SuggestionItemView: View {
-    let suggestion: ChatMessageRecord
+    let suggestion: SuggestionDisplayItem
     let isExpanded: Bool
     let onToggle: () -> Void
     var ttsPlaybackService: TTSPlaybackService?
+    var onDismiss: ((String) -> Void)?
+    var onFeedback: ((String, String) -> Void)?
 
     private var timeAgo: String {
         let interval = Date().timeIntervalSince(suggestion.createdAt)
@@ -140,6 +148,12 @@ struct SuggestionItemView: View {
                     ttsButton(service: service)
                 }
 
+                if suggestion.isStreaming {
+                    Text("streaming")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
+
                 Button(action: onToggle) {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption)
@@ -148,8 +162,16 @@ struct SuggestionItemView: View {
             }
 
             if isExpanded {
-                MarkdownTextView(text: suggestion.content, font: .callout)
-                    .textSelection(.enabled)
+                HStack(alignment: .top, spacing: 0) {
+                    MarkdownTextView(text: suggestion.content, font: .callout)
+                        .textSelection(.enabled)
+                    if suggestion.isStreaming {
+                        Text("|\u{2060}")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .blink()
+                    }
+                }
             } else {
                 Text(suggestion.content)
                     .font(.callout)
@@ -157,10 +179,60 @@ struct SuggestionItemView: View {
                     .textSelection(.enabled)
                     .lineLimit(2)
             }
+
+            if !suggestion.isStreaming {
+                HStack(spacing: 12) {
+                    if let onFeedback {
+                        feedbackButtons(onFeedback)
+                    }
+                    Spacer()
+                    if let onDismiss {
+                        Button {
+                            onDismiss(suggestion.id)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss")
+                    }
+                }
+            }
         }
         .padding(12)
         .background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(suggestion.isStreaming ? Color.blue.opacity(0.4) : Color.clear, lineWidth: 1)
+                .animation(.easeInOut(duration: 0.3), value: suggestion.isStreaming)
+        )
+    }
+
+    @ViewBuilder
+    private func feedbackButtons(_ onFeedback: @escaping (String, String) -> Void) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                onFeedback(suggestion.id, "helpful")
+            } label: {
+                Image(systemName: suggestion.feedback == "helpful" ? "hand.thumbsup.fill" : "hand.thumbsup")
+                    .font(.caption2)
+                    .foregroundStyle(suggestion.feedback == "helpful" ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Helpful")
+
+            Button {
+                onFeedback(suggestion.id, "not_relevant")
+            } label: {
+                Image(systemName: suggestion.feedback == "not_relevant" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    .font(.caption2)
+                    .foregroundStyle(suggestion.feedback == "not_relevant" ? .orange : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Not relevant")
+        }
     }
 
     @ViewBuilder
@@ -194,21 +266,40 @@ struct SuggestionItemView: View {
     }
 }
 
+extension View {
+    @ViewBuilder
+    func blink() -> some View {
+        modifier(BlinkModifier())
+    }
+}
+
+struct BlinkModifier: ViewModifier {
+    @State private var visible = true
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    visible.toggle()
+                }
+            }
+    }
+}
+
 #Preview {
     SuggestionPanelView(
         suggestions: [
-            ChatMessageRecord(
+            SuggestionDisplayItem(
                 id: "1",
-                role: "assistant",
-                content: "Consider asking about the project timeline to ensure alignment with the team's expectations.",
-                meetingId: "meeting1",
+                content: "The project timeline was discussed in the last meeting with the same stakeholders. Q3 deadline was confirmed.",
+                isStreaming: false,
                 createdAt: Date().addingTimeInterval(-300)
             ),
-            ChatMessageRecord(
+            SuggestionDisplayItem(
                 id: "2",
-                role: "assistant",
-                content: "Based on the discussion, it might be helpful to clarify the budget constraints before moving forward.",
-                meetingId: "meeting1",
+                content: "Based on the discussion, the budget constraints were clarified at $50K max.",
+                isStreaming: true,
                 createdAt: Date().addingTimeInterval(-60)
             )
         ],

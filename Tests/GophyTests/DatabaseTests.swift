@@ -4,6 +4,8 @@ import GRDB
 @testable import Gophy
 
 final class DatabaseTests: XCTestCase {
+    private let expectedMigrationCount = 18
+
     var tempDirectory: URL!
     var storageManager: StorageManager!
     var database: GophyDatabase!
@@ -30,7 +32,7 @@ final class DatabaseTests: XCTestCase {
         try dbQueue.read { db in
             let appliedMigrations = try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
 
-            XCTAssertEqual(appliedMigrations.count, 17, "Should have 17 migrations applied")
+            XCTAssertEqual(appliedMigrations.count, expectedMigrationCount, "Should have \(expectedMigrationCount) migrations applied")
             XCTAssertTrue(appliedMigrations.contains("v1_create_meetings"), "Should have meetings migration")
             XCTAssertTrue(appliedMigrations.contains("v2_create_transcript_segments"), "Should have transcript_segments migration")
             XCTAssertTrue(appliedMigrations.contains("v3_create_documents"), "Should have documents migration")
@@ -48,6 +50,11 @@ final class DatabaseTests: XCTestCase {
             XCTAssertTrue(appliedMigrations.contains("v15_add_meetingId_to_documents"), "Should have meetingId_to_documents migration")
             XCTAssertTrue(appliedMigrations.contains("v16_embedding_metadata"), "Should have embedding_metadata migration")
             XCTAssertTrue(appliedMigrations.contains("v17_create_chats"), "Should have create_chats migration")
+            XCTAssertTrue(appliedMigrations.contains("v18_add_suggestion_feedback"), "Should have suggestion_feedback migration")
+
+            let chatMessageColumns = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('chat_messages')")
+            XCTAssertTrue(chatMessageColumns.contains("dismissed"), "Should have dismissed column")
+            XCTAssertTrue(chatMessageColumns.contains("feedback"), "Should have feedback column")
         }
     }
 
@@ -313,7 +320,7 @@ final class DatabaseTests: XCTestCase {
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations").count
         }
 
-        XCTAssertEqual(firstCount, 17, "First database should have 17 migrations")
+        XCTAssertEqual(firstCount, expectedMigrationCount, "First database should have \(expectedMigrationCount) migrations")
 
         let secondDB = try GophyDatabase(storageManager: storageManager)
         let secondDBQueue = secondDB.dbQueue
@@ -322,7 +329,7 @@ final class DatabaseTests: XCTestCase {
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations").count
         }
 
-        XCTAssertEqual(secondCount, 17, "Second database should still have 17 migrations")
+        XCTAssertEqual(secondCount, expectedMigrationCount, "Second database should still have \(expectedMigrationCount) migrations")
     }
 
     func testEmbeddingIdMappingTableCreated() throws {

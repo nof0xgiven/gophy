@@ -27,3 +27,34 @@ extension MeetingEvent {
         }
     }
 }
+
+// MARK: - MeetingEventBroadcaster
+
+public actor MeetingEventBroadcaster {
+    public static let shared = MeetingEventBroadcaster()
+
+    private var subscribers: [UUID: AsyncStream<MeetingEvent>.Continuation] = [:]
+
+    public init() {}
+
+    public func broadcast(_ event: MeetingEvent) {
+        for continuation in subscribers.values {
+            continuation.yield(event)
+        }
+    }
+
+    public func subscribe() -> AsyncStream<MeetingEvent> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream.makeStream(of: MeetingEvent.self)
+        subscribers[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.unsubscribe(id: id) }
+        }
+        return stream
+    }
+
+    public func unsubscribe(id: UUID) {
+        subscribers[id]?.finish()
+        subscribers.removeValue(forKey: id)
+    }
+}

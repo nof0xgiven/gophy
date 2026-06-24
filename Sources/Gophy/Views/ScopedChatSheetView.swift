@@ -54,8 +54,7 @@ struct ScopedChatSheetView: View {
 
     private func initialize() async {
         do {
-            let storageManager = StorageManager()
-            let db = try GophyDatabase(storageManager: storageManager)
+            let db = try AppDependencies.shared.database()
             let chatRepo = ChatRepository(database: db)
 
             try await chatRepo.ensurePredefinedChatsExist()

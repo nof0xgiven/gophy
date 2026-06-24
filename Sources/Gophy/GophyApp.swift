@@ -11,6 +11,9 @@ struct GophyApp: App {
 
         // Reset recording flag on launch (crash recovery)
         UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
+
+        // Start meeting state tracker for menu bar and overlay
+        MeetingStateTracker.shared.startTracking()
     }
 
     var body: some Scene {
@@ -35,19 +38,24 @@ struct GophyApp: App {
                     navigationCoordinator.selectedItem = .meetings
                 }
                 .keyboardShortcut("n", modifiers: .command)
+
+                Button("Toggle Overlay") {
+                    CompactOverlayWindowController.shared.toggleOverlay()
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
             }
         }
 
-        MenuBarExtra("Gophy", systemImage: "phone.circle.fill") {
-            Button("Show Gophy") {
-                activateApp()
-            }
-            Divider()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
+        MenuBarExtra("Gophy", systemImage: menuBarIcon) {
+            MenuBarContentView()
+                .environment(navigationCoordinator)
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
+    }
+
+    private var menuBarIcon: String {
+        let status = MeetingStateTracker.shared.status
+        return (status == .active || status == .paused) ? "record.circle.fill" : "phone.circle.fill"
     }
 
     private func activateApp() {

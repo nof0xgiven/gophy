@@ -79,11 +79,8 @@ struct MeetingContainerView: View {
         do {
             logger.info("Starting meeting initialization...")
 
-            let storageManager = StorageManager()
-            logger.info("Created StorageManager")
-
-            let database = try GophyDatabase(storageManager: storageManager)
-            logger.info("Created database")
+            let database = try AppDependencies.shared.database()
+            logger.info("Loaded shared database")
 
             let meetingRepo = MeetingRepository(database: database)
             let chatRepo = ChatMessageRepository(database: database)

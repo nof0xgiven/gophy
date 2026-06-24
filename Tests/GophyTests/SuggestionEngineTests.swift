@@ -183,6 +183,22 @@ final class SuggestionEngineTests: XCTestCase {
         XCTAssertEqual(tokens, ["Token", " 1", " Token", " 2"])
     }
 
+    func testEmptySuggestionStreamIsNotStoredAsChatMessage() async throws {
+        await mockMeetingRepo.setTranscript(for: "meeting1", segments: [])
+        await mockEmbedding.setEmbedding(Array(repeating: 0.1, count: 768))
+        await mockVectorSearch.setResults([])
+        await mockTextGen.setTokens([])
+
+        var tokens: [String] = []
+        for await token in engine.generateSuggestionStream(meetingId: "meeting1") {
+            tokens.append(token)
+        }
+
+        XCTAssertEqual(tokens, [])
+        let savedMessages = await mockChatRepo.savedMessages
+        XCTAssertEqual(savedMessages.count, 0)
+    }
+
     func testRAGContextIncludesDocumentChunks() async throws {
         // Set up transcript
         await mockMeetingRepo.setTranscript(for: "meeting1", segments: [

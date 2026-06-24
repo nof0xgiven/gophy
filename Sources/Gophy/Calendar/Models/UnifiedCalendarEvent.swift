@@ -5,7 +5,7 @@ enum CalendarEventSource: String, Sendable, Equatable {
     case eventKit
 }
 
-struct UnifiedCalendarEvent: Sendable, Equatable, Identifiable {
+struct UnifiedCalendarEvent: Sendable, Hashable, Identifiable {
     let id: String
     let title: String
     let startDate: Date
@@ -17,8 +17,4 @@ struct UnifiedCalendarEvent: Sendable, Equatable, Identifiable {
     let source: CalendarEventSource
     let googleEventId: String?
     let calendarId: String?
-
-    static func == (lhs: UnifiedCalendarEvent, rhs: UnifiedCalendarEvent) -> Bool {
-        lhs.id == rhs.id
-    }
 }

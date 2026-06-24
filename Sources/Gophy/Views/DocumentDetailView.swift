@@ -186,8 +186,7 @@ struct DocumentDetailView: View {
         guard viewModel == nil else { return }
 
         do {
-            let storageManager = StorageManager()
-            let database = try GophyDatabase(storageManager: storageManager)
+            let database = try AppDependencies.shared.database()
             let documentRepo = DocumentRepository(database: database)
 
             viewModel = DocumentDetailViewModel(documentRepository: documentRepo)

@@ -314,6 +314,13 @@ public final class GophyDatabase: Sendable {
             try db.execute(sql: "CREATE UNIQUE INDEX idx_chats_context ON chats(contextType, contextId) WHERE contextId IS NOT NULL")
         }
 
+        migrator.registerMigration("v18_add_suggestion_feedback") { db in
+            try db.alter(table: "chat_messages") { t in
+                t.add(column: "dismissed", .boolean).notNull().defaults(to: false)
+                t.add(column: "feedback", .text)
+            }
+        }
+
         return migrator
     }
 }

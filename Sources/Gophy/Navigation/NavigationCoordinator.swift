@@ -64,8 +64,7 @@ final class NavigationCoordinator {
             return chatRepository
         }
 
-        let storageManager = StorageManager()
-        let db = try GophyDatabase(storageManager: storageManager)
+        let db = try AppDependencies.shared.database()
         let repo = ChatRepository(database: db)
         self.database = db
         self.chatRepository = repo

@@ -8,6 +8,8 @@ public struct ChatMessageRecord: Codable, Sendable {
     public let meetingId: String?
     public let chatId: String?
     public let createdAt: Date
+    public var dismissed: Bool
+    public var feedback: String?
 
     public init(
         id: String,
@@ -15,7 +17,9 @@ public struct ChatMessageRecord: Codable, Sendable {
         content: String,
         meetingId: String?,
         chatId: String? = nil,
-        createdAt: Date
+        createdAt: Date,
+        dismissed: Bool = false,
+        feedback: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -23,6 +27,8 @@ public struct ChatMessageRecord: Codable, Sendable {
         self.meetingId = meetingId
         self.chatId = chatId
         self.createdAt = createdAt
+        self.dismissed = dismissed
+        self.feedback = feedback
     }
 }
 

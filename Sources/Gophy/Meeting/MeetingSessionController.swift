@@ -204,6 +204,7 @@ public actor MeetingSessionController {
             automationTask = Task {
                 for await event in automationEvents {
                     eventContinuation?.yield(.automation(event))
+                    await MeetingEventBroadcaster.shared.broadcast(.automation(event))
                 }
             }
         }
@@ -344,6 +345,7 @@ public actor MeetingSessionController {
 
     private func handleTranscriptSegment(_ segment: TranscriptSegment, meetingId: String) async {
         eventContinuation?.yield(.transcriptSegment(segment))
+        await MeetingEventBroadcaster.shared.broadcast(.transcriptSegment(segment))
 
         let segmentRecord = TranscriptSegmentRecord(
             id: UUID().uuidString,
@@ -360,12 +362,14 @@ public actor MeetingSessionController {
             try await meetingRepository.addTranscriptSegment(segmentRecord)
         } catch {
             eventContinuation?.yield(.error(MeetingEvent.ErrorWrapper(error)))
+            await MeetingEventBroadcaster.shared.broadcast(.error(MeetingEvent.ErrorWrapper(error)))
         }
     }
 
     private func updateStatus(_ status: MeetingStatus) {
         currentStatus = status
         eventContinuation?.yield(.statusChange(status))
+        Task { await MeetingEventBroadcaster.shared.broadcast(.statusChange(status)) }
     }
 }
 

@@ -45,6 +45,10 @@ struct MeetingView: View {
 
                 transcriptArea
 
+                if viewModel.status == .active || viewModel.status == .paused {
+                    MeetingQuickActionBar(viewModel: viewModel)
+                }
+
                 MeetingControlBar(
                     status: viewModel.status,
                     micLevel: viewModel.micLevel,
@@ -67,12 +71,22 @@ struct MeetingView: View {
             Divider()
 
             SuggestionPanelView(
-                suggestions: viewModel.suggestions,
+                suggestions: viewModel.suggestions.filter { !$0.dismissed },
                 isGenerating: viewModel.isGeneratingSuggestion,
                 onRefresh: {
                     await viewModel.refreshSuggestions()
                 },
-                ttsPlaybackService: ttsPlaybackService
+                ttsPlaybackService: ttsPlaybackService,
+                onDismiss: { id in
+                    Task {
+                        await viewModel.dismissSuggestion(id: id)
+                    }
+                },
+                onFeedback: { id, feedback in
+                    Task {
+                        await viewModel.setSuggestionFeedback(id: id, feedback: feedback)
+                    }
+                }
             )
         }
         .task {

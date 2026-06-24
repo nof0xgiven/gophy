@@ -74,8 +74,7 @@ struct CalendarMeetingsView: View {
 
     private func initializeViewModel() async {
         do {
-            let storage = StorageManager()
-            let database = try GophyDatabase(storageManager: storage)
+            let database = try AppDependencies.shared.database()
             let meetingRepo = MeetingRepository(database: database)
             let chatRepo = ChatMessageRepository(database: database)
             let documentRepo = DocumentRepository(database: database)

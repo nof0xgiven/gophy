@@ -251,8 +251,7 @@ struct DocumentManagerView: View {
         guard viewModel == nil, initError == nil else { return }
 
         do {
-            let storageManager = StorageManager()
-            let database = try GophyDatabase(storageManager: storageManager)
+            let database = try AppDependencies.shared.database()
             let documentRepo = DocumentRepository(database: database)
             let meetingRepo = MeetingRepository(database: database)
 

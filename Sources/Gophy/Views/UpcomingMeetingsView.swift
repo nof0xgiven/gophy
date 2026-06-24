@@ -4,6 +4,7 @@ import SwiftUI
 struct UpcomingMeetingsView: View {
     @State private var viewModel: UpcomingMeetingsViewModel
     var onStartRecording: ((UnifiedCalendarEvent) -> Void)?
+    @State private var briefingEvent: UnifiedCalendarEvent?
 
     init(
         viewModel: UpcomingMeetingsViewModel,
@@ -30,6 +31,14 @@ struct UpcomingMeetingsView: View {
         }
         .onDisappear {
             viewModel.stopListening()
+        }
+        .sheet(item: $briefingEvent) { event in
+            MeetingBriefingSheet(
+                event: event,
+                onStartRecording: {
+                    onStartRecording?(event)
+                }
+            )
         }
     }
 
@@ -91,6 +100,9 @@ struct UpcomingMeetingsView: View {
                         if let link = event.meetingLink, let url = URL(string: link) {
                             NSWorkspace.shared.open(url)
                         }
+                    },
+                    onBriefing: {
+                        briefingEvent = event
                     }
                 )
 
@@ -114,6 +126,7 @@ private struct MeetingRowView: View {
     let showStartRecording: Bool
     var onStartRecording: (() -> Void)?
     var onOpenLink: (() -> Void)?
+    var onBriefing: (() -> Void)?
 
     private var proximityColor: Color {
         switch proximity {
@@ -164,6 +177,16 @@ private struct MeetingRowView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open meeting link")
+            }
+
+            if let onBriefing {
+                Button(action: onBriefing) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("View briefing")
             }
 
             if showStartRecording {

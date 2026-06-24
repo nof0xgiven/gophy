@@ -95,8 +95,7 @@ struct ChatView: View {
         guard database == nil, initError == nil else { return }
 
         do {
-            let storageManager = StorageManager()
-            let db = try GophyDatabase(storageManager: storageManager)
+            let db = try AppDependencies.shared.database()
             let chatRepo = ChatRepository(database: db)
             let vm = ChatListViewModel(chatRepository: chatRepo)
             await vm.loadChats()

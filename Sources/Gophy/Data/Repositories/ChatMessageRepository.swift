@@ -54,6 +54,24 @@ public final class ChatMessageRepository: Sendable {
             _ = try ChatMessageRecord.deleteOne(db, key: id)
         }
     }
+
+    public func setDismissed(id: String, dismissed: Bool) async throws {
+        try await database.dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE chat_messages SET dismissed = ? WHERE id = ?",
+                arguments: [dismissed, id]
+            )
+        }
+    }
+
+    public func setFeedback(id: String, feedback: String) async throws {
+        try await database.dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE chat_messages SET feedback = ? WHERE id = ?",
+                arguments: [feedback, id]
+            )
+        }
+    }
 }
 
 extension ChatMessageRepository: ChatMessageRepoForSuggestion {}

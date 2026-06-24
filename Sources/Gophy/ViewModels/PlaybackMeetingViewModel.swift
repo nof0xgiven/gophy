@@ -16,7 +16,7 @@ public final class PlaybackMeetingViewModel {
     public var title: String
     public var status: MeetingStatus = .idle
     public var transcriptSegments: [TranscriptSegmentRecord] = []
-    public var suggestions: [ChatMessageRecord] = []
+    public var suggestions: [SuggestionDisplayItem] = []
     public var currentTime: TimeInterval = 0
     public var duration: TimeInterval = 0
     public var speed: Float = 1.0
@@ -365,14 +365,10 @@ public final class PlaybackMeetingViewModel {
             }
 
         case .suggestion(let text):
-            let message = ChatMessageRecord(
-                id: UUID().uuidString,
-                role: "assistant",
+            suggestions.append(SuggestionDisplayItem(
                 content: text,
-                meetingId: meetingRecord.id,
-                createdAt: Date()
-            )
-            suggestions.append(message)
+                isStreaming: false
+            ))
 
         case .statusChange(let newStatus):
             status = newStatus
@@ -412,7 +408,8 @@ public final class PlaybackMeetingViewModel {
 
     private func loadSuggestions() async {
         do {
-            suggestions = try await chatMessageRepository.listForMeeting(meetingId: meetingRecord.id)
+            let records = try await chatMessageRepository.listForMeeting(meetingId: meetingRecord.id)
+            suggestions = records.map { SuggestionDisplayItem(from: $0) }
         } catch {
             errorMessage = "Failed to load suggestions: \(error.localizedDescription)"
         }

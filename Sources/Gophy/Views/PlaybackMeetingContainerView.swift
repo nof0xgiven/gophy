@@ -66,8 +66,7 @@ struct PlaybackMeetingContainerView: View {
         guard viewModel == nil, initError == nil else { return }
 
         do {
-            let storageManager = StorageManager()
-            let database = try GophyDatabase(storageManager: storageManager)
+            let database = try AppDependencies.shared.database()
             let meetingRepo = MeetingRepository(database: database)
             let chatRepo = ChatMessageRepository(database: database)
             let documentRepo = DocumentRepository(database: database)
