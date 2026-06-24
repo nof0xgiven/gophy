@@ -65,6 +65,7 @@ public actor SuggestionEngine {
     private let meetingRepository: any MeetingRepositoryProtocol
     private let documentRepository: any DocumentRepositoryForSuggestion
     private let chatMessageRepository: any ChatMessageRepoForSuggestion
+    private let allowedDocumentIds: Set<String>
     private let autoTriggerInterval: TimeInterval
 
     private let systemPrompt = """
@@ -114,6 +115,7 @@ public actor SuggestionEngine {
         meetingRepository: any MeetingRepositoryProtocol,
         documentRepository: any DocumentRepositoryForSuggestion,
         chatMessageRepository: any ChatMessageRepoForSuggestion,
+        allowedDocumentIds: Set<String> = [],
         autoTriggerInterval: TimeInterval = 30.0
     ) {
         self.providerRegistry = providerRegistry
@@ -123,6 +125,7 @@ public actor SuggestionEngine {
         self.meetingRepository = meetingRepository
         self.documentRepository = documentRepository
         self.chatMessageRepository = chatMessageRepository
+        self.allowedDocumentIds = allowedDocumentIds
         self.autoTriggerInterval = autoTriggerInterval
     }
 
@@ -134,6 +137,7 @@ public actor SuggestionEngine {
         meetingRepository: any MeetingRepositoryProtocol,
         documentRepository: any DocumentRepositoryForSuggestion,
         chatMessageRepository: any ChatMessageRepoForSuggestion,
+        allowedDocumentIds: Set<String> = [],
         autoTriggerInterval: TimeInterval = 30.0
     ) {
         self.textGenProvider = textGenProvider
@@ -143,6 +147,7 @@ public actor SuggestionEngine {
         self.meetingRepository = meetingRepository
         self.documentRepository = documentRepository
         self.chatMessageRepository = chatMessageRepository
+        self.allowedDocumentIds = allowedDocumentIds
         self.autoTriggerInterval = autoTriggerInterval
     }
 
@@ -154,6 +159,7 @@ public actor SuggestionEngine {
         meetingRepository: any MeetingRepositoryProtocol,
         documentRepository: any DocumentRepositoryForSuggestion,
         chatMessageRepository: any ChatMessageRepoForSuggestion,
+        allowedDocumentIds: Set<String> = [],
         autoTriggerInterval: TimeInterval = 30.0
     ) {
         self.textGenProvider = TextGenProviderAdapter(engine: textGenerationEngine)
@@ -163,6 +169,7 @@ public actor SuggestionEngine {
         self.meetingRepository = meetingRepository
         self.documentRepository = documentRepository
         self.chatMessageRepository = chatMessageRepository
+        self.allowedDocumentIds = allowedDocumentIds
         self.autoTriggerInterval = autoTriggerInterval
     }
 
@@ -272,7 +279,7 @@ public actor SuggestionEngine {
                     let transcript = try await self.getRecentTranscript(meetingId: meetingId, lastSeconds: 60.0)
 
                     // Get RAG context
-                    let ragContext = try await self.getRAGContext(for: transcript)
+                    let ragContext = try await self.getRAGContext(for: transcript, meetingId: meetingId)
 
                     // Build prompt
                     let prompt = await self.buildPrompt(transcript: transcript, ragContext: ragContext)
@@ -332,7 +339,7 @@ public actor SuggestionEngine {
         case documentChunk(DocumentChunkRecord)
     }
 
-    private func getRAGContext(for transcript: [TranscriptSegmentRecord]) async throws -> [RAGContextItem] {
+    private func getRAGContext(for transcript: [TranscriptSegmentRecord], meetingId: String) async throws -> [RAGContextItem] {
         guard !transcript.isEmpty else {
             return []
         }
@@ -350,9 +357,11 @@ public actor SuggestionEngine {
         var contextItems: [RAGContextItem] = []
         for result in searchResults {
             // Try as transcript segment first
-            if let segment = try await meetingRepository.getSegment(id: result.id) {
+            if let segment = try await meetingRepository.getSegment(id: result.id),
+               segment.meetingId == meetingId {
                 contextItems.append(.transcriptSegment(segment))
-            } else if let chunk = try await documentRepository.getChunk(id: result.id) {
+            } else if let chunk = try await documentRepository.getChunk(id: result.id),
+                      allowedDocumentIds.contains(chunk.documentId) {
                 // Try as document chunk
                 contextItems.append(.documentChunk(chunk))
             }

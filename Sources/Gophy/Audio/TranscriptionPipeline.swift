@@ -246,7 +246,7 @@ public actor TranscriptionPipeline {
 
             // Convert to transcript segments with speaker labels and language detection
             for segment in segments {
-                pipelineLogger.info("Segment: \"\(segment.text, privacy: .public)\" [\(String(format: "%.2f", segment.startTime), privacy: .public) - \(String(format: "%.2f", segment.endTime), privacy: .public)]")
+                pipelineLogger.info("Segment received [\(String(format: "%.2f", segment.startTime), privacy: .public) - \(String(format: "%.2f", segment.endTime), privacy: .public)], characters=\(segment.text.count, privacy: .public)")
                 let detected = languageDetector.detect(text: segment.text)
                 let transcriptSegment = TranscriptSegment(
                     text: segment.text,

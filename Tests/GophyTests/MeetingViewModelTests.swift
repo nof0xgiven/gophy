@@ -63,6 +63,29 @@ final class MeetingViewModelTests: XCTestCase {
         XCTAssertNil(MeetingViewModel.userVisibleErrorMessage(for: CancellationError()))
     }
 
+    func testPrepareForDismissalStopsActiveMeeting() async throws {
+        let (viewModel, controller) = makeViewModel()
+
+        await viewModel.startMeeting()
+
+        for _ in 0..<20 where controller.currentMeetingId == nil {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertNotNil(controller.currentMeetingId)
+        XCTAssertEqual(UserDefaults.standard.bool(forKey: "isCurrentlyRecording"), true)
+
+        await viewModel.prepareForDismissal()
+
+        for _ in 0..<20 where viewModel.status != .completed {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertEqual(viewModel.status, .completed)
+        XCTAssertEqual(UserDefaults.standard.bool(forKey: "isCurrentlyRecording"), false)
+        XCTAssertNil(controller.currentMeetingId)
+    }
+
     private func seedSuggestion(id: String) async throws -> ChatMessageRecord {
         let meeting = MeetingRecord(
             id: "meeting-1",

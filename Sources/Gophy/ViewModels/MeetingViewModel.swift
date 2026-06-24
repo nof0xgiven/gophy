@@ -92,6 +92,24 @@ public final class MeetingViewModel {
         }
     }
 
+    public func prepareForDismissal() async {
+        if sessionController.currentMeetingId != nil {
+            await stopMeeting()
+            return
+        }
+
+        switch status {
+        case .starting, .active, .paused:
+            suggestionTask?.cancel()
+            suggestionTask = nil
+            stopDurationTimer()
+            UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
+            MeetingStateTracker.shared.setMeetingId(nil)
+        case .idle, .stopping, .completed:
+            break
+        }
+    }
+
     public func pauseMeeting() async {
         await sessionController.pause()
         stopDurationTimer()
