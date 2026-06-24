@@ -5,11 +5,24 @@ import os.log
 
 private let mlxSTTLogger = Logger(subsystem: "com.gophy.app", category: "MLXSTTEngine")
 
-public enum MLXSTTError: Error, Sendable {
+public enum MLXSTTError: Error, LocalizedError, Sendable {
     case modelNotLoaded
     case noAudioRegistryModel
     case transcriptionFailed(String)
     case unsupportedModelType(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .modelNotLoaded:
+            return "MLX speech-to-text model is not loaded."
+        case .noAudioRegistryModel:
+            return "No downloaded MLX speech-to-text model is available."
+        case .transcriptionFailed(let message):
+            return "MLX transcription failed: \(message)"
+        case .unsupportedModelType(let modelId):
+            return "Unsupported MLX speech-to-text model: \(modelId)"
+        }
+    }
 }
 
 public protocol MLXSTTModelProtocol: Sendable {
@@ -65,8 +78,7 @@ public final class MLXSTTEngine: @unchecked Sendable {
         let sttModels = modelRegistry.availableModels().filter { $0.type == .stt && $0.source == .audioRegistry }
 
         guard let sttModel = sttModels.first(where: { $0.id == selectedId && modelRegistry.isDownloaded($0) })
-                ?? sttModels.first(where: { modelRegistry.isDownloaded($0) })
-                ?? sttModels.first else {
+                ?? sttModels.first(where: { modelRegistry.isDownloaded($0) }) else {
             throw MLXSTTError.noAudioRegistryModel
         }
 

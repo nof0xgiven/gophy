@@ -72,7 +72,8 @@ struct PlaybackMeetingContainerView: View {
             let documentRepo = DocumentRepository(database: database)
 
             // Check required models
-            guard (ModelRegistry.shared.availableModels().first(where: { $0.type == .stt })) != nil else {
+            if TranscriptionModelAvailability.usesLocalSTT(),
+               TranscriptionModelAvailability.downloadedLocalSTTModel() == nil {
                 initError = "Transcription model not downloaded. Download a speech-to-text model to process recordings."
                 return
             }

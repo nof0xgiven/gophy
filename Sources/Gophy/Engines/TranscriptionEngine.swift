@@ -24,11 +24,10 @@ public final class TranscriptionEngine: @unchecked Sendable {
 
     public func load() async throws {
         let selectedId = UserDefaults.standard.string(forKey: "selectedSTTModelId") ?? "whisperkit-large-v3-turbo"
-        let sttModels = modelRegistry.availableModels().filter { $0.type == .stt }
+        let sttModels = modelRegistry.availableModels().filter { $0.type == .stt && $0.source == .curated }
 
         guard let sttModel = sttModels.first(where: { $0.id == selectedId && modelRegistry.isDownloaded($0) })
-                ?? sttModels.first(where: { modelRegistry.isDownloaded($0) })
-                ?? sttModels.first else {
+                ?? sttModels.first(where: { modelRegistry.isDownloaded($0) }) else {
             throw TranscriptionError.noModelAvailable
         }
         let modelPath = modelRegistry.downloadPath(for: sttModel).path
@@ -97,8 +96,19 @@ public final class TranscriptionEngine: @unchecked Sendable {
     }
 }
 
-public enum TranscriptionError: Error, Sendable {
+public enum TranscriptionError: Error, LocalizedError, Sendable {
     case modelNotLoaded
     case invalidAudioFormat
     case noModelAvailable
+
+    public var errorDescription: String? {
+        switch self {
+        case .modelNotLoaded:
+            return "Transcription model is not loaded."
+        case .invalidAudioFormat:
+            return "Audio format is not supported for transcription."
+        case .noModelAvailable:
+            return "No downloaded speech-to-text model is available."
+        }
+    }
 }

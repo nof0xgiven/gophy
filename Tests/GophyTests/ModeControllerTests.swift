@@ -237,9 +237,31 @@ struct ModeControllerTests {
         #expect(!mockEmbedding.loadCalled)
         #expect(!mockEmbedding.unloadCalled)
     }
+
+    @Test("Creating a transcription pipeline does not load the local STT engine")
+    func testCreateTranscriptionPipelineDoesNotLoadSTTEngine() async throws {
+        let mockTranscription = MockTranscriptionEngine()
+        let mockTextGen = MockTextGenerationEngine()
+        let mockEmbedding = MockEmbeddingEngine()
+        let mockOCR = MockOCREngine()
+        let mockRegistry = MockModelRegistry()
+
+        let controller = ModeController(
+            transcriptionEngine: mockTranscription,
+            textGenerationEngine: mockTextGen,
+            embeddingEngine: mockEmbedding,
+            ocrEngine: mockOCR,
+            modelRegistry: mockRegistry
+        )
+
+        _ = try await controller.createTranscriptionPipeline()
+
+        #expect(!mockTranscription.loadCalled)
+        #expect(!mockTranscription.isLoaded)
+    }
 }
 
-final class MockTranscriptionEngine: TranscriptionEngineProtocol, @unchecked Sendable {
+final class MockTranscriptionEngine: TranscriptionEngineProtocol, PipelineTranscriptionProtocol, @unchecked Sendable {
     var loadCalled = false
     var unloadCalled = false
     var isLoaded = false
@@ -252,6 +274,10 @@ final class MockTranscriptionEngine: TranscriptionEngineProtocol, @unchecked Sen
     func unload() {
         unloadCalled = true
         isLoaded = false
+    }
+
+    func transcribe(audioArray: [Float], sampleRate: Int, language: String?) async throws -> [TranscriptionSegment] {
+        []
     }
 }
 

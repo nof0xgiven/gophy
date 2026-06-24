@@ -1,4 +1,5 @@
 import Foundation
+import CoreML
 @_spi(Internal) import WhisperKit
 
 struct WhisperResultWrapper: WhisperResultProtocol {
@@ -25,7 +26,21 @@ public final class WhisperKitWrapper: WhisperKitProtocol, @unchecked Sendable {
     private let whisperKit: WhisperKit
 
     public init(modelFolder: String) async throws {
-        self.whisperKit = try await WhisperKit(modelFolder: modelFolder)
+        let computeOptions = ModelComputeOptions(
+            melCompute: .cpuAndGPU,
+            audioEncoderCompute: .cpuAndGPU,
+            textDecoderCompute: .cpuAndGPU,
+            prefillCompute: .cpuOnly
+        )
+        let config = WhisperKitConfig(
+            modelFolder: modelFolder,
+            computeOptions: computeOptions,
+            verbose: false,
+            logLevel: .error,
+            prewarm: false,
+            download: false
+        )
+        self.whisperKit = try await WhisperKit(config)
     }
 
     public func transcribe(audioArray: [Float], language: String? = nil) async throws -> [WhisperResultProtocol] {

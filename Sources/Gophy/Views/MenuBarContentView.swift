@@ -4,7 +4,6 @@ import SwiftUI
 struct MenuBarContentView: View {
     @Environment(NavigationCoordinator.self) private var navigationCoordinator
     @State private var viewModel = MenuBarViewModel()
-    @State private var hasAppeared = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,10 +30,7 @@ struct MenuBarContentView: View {
         .frame(width: 320)
         .padding(.vertical, 4)
         .task {
-            if !hasAppeared {
-                hasAppeared = true
-                viewModel.start()
-            }
+            viewModel.start()
         }
         .onDisappear {
             viewModel.stop()
@@ -151,7 +147,9 @@ struct MenuBarContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var footerSection: some View {

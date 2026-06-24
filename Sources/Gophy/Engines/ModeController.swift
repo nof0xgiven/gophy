@@ -306,17 +306,25 @@ public final class ModeController: @unchecked Sendable {
     }
 
     /// Create a TranscriptionPipeline with the correctly resolved STT engine.
-    /// Loads the engine if not already loaded.
     public func createTranscriptionPipeline(vadFilter: VADFilter = VADFilter()) async throws -> TranscriptionPipeline {
         let engine = resolveSTTEngine()
-        if !engine.isLoaded {
-            try await engine.load()
-        }
-        // Both TranscriptionEngine and MLXSTTEngine conform to PipelineTranscriptionProtocol
         guard let pipelineEngine = engine as? any PipelineTranscriptionProtocol else {
             modeLogger.error("Resolved STT engine does not conform to PipelineTranscriptionProtocol")
             throw ModeControllerError.engineNotPipelineCompatible
         }
+
+        if providerRegistry?.isCloudProvider(for: .speechToText) == true {
+            modeLogger.info("Creating provider-backed transcription pipeline")
+            guard let providerRegistry else {
+                throw ModeControllerError.engineNotPipelineCompatible
+            }
+            return TranscriptionPipeline(
+                sttProvider: providerRegistry.activeSTTProvider(),
+                transcriptionEngine: pipelineEngine,
+                vadFilter: vadFilter
+            )
+        }
+
         return TranscriptionPipeline(transcriptionEngine: pipelineEngine, vadFilter: vadFilter)
     }
 

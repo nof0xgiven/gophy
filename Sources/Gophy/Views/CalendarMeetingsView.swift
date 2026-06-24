@@ -54,11 +54,16 @@ struct CalendarMeetingsView: View {
         .animation(.easeInOut(duration: 0.25), value: playbackMeeting?.id)
         .task {
             await initializeViewModel()
+            presentPendingAutoStartIfNeeded()
         }
         .onChange(of: navigationCoordinator.pendingAutoStart) { _, newValue in
-            if newValue != nil {
-                activeSheet = .newMeetingForEvent
-            }
+            presentPendingAutoStartIfNeeded()
+        }
+    }
+
+    private func presentPendingAutoStartIfNeeded() {
+        if navigationCoordinator.pendingAutoStart != nil {
+            activeSheet = .newMeetingForEvent
         }
     }
 

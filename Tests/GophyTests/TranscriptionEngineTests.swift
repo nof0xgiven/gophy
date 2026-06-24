@@ -36,6 +36,28 @@ final class TranscriptionEngineTests: XCTestCase {
         XCTAssertTrue(engine.isLoaded)
     }
 
+    func testLoadThrowsWithoutInvokingWhisperKitWhenNoDownloadedModelExists() async {
+        let registry = TranscriptionUnavailableModelRegistry()
+        let loaderProbe = TranscriptionLoaderProbe()
+        let engine = TranscriptionEngine(
+            modelRegistry: registry,
+            whisperKitLoader: { _ in
+                loaderProbe.markCalled()
+                return MockWhisperKit()
+            }
+        )
+
+        do {
+            try await engine.load()
+            XCTFail("Expected TranscriptionError.noModelAvailable")
+        } catch TranscriptionError.noModelAvailable {
+            XCTAssertFalse(engine.isLoaded)
+            XCTAssertFalse(loaderProbe.wasCalled)
+        } catch {
+            XCTFail("Expected TranscriptionError.noModelAvailable but got \(error)")
+        }
+    }
+
     func testTranscriptionEngineThrowsWhenTranscribingWithoutLoading() async {
         let audioArray: [Float] = Array(repeating: 0.0, count: 16000)
 
@@ -123,6 +145,43 @@ final class TranscriptionMockModelRegistry: ModelRegistryProtocol {
 
     func isDownloaded(_ model: ModelDefinition) -> Bool {
         return true
+    }
+}
+
+final class TranscriptionUnavailableModelRegistry: ModelRegistryProtocol {
+    func availableModels() -> [ModelDefinition] {
+        [
+            ModelDefinition(
+                id: "whisperkit-large-v3-turbo",
+                name: "WhisperKit large-v3-turbo",
+                type: .stt,
+                huggingFaceID: "argmaxinc/whisperkit-coreml-large-v3-turbo",
+                approximateSizeGB: 1.5,
+                memoryUsageGB: 1.5,
+                source: .curated
+            )
+        ]
+    }
+
+    func downloadPath(for model: ModelDefinition) -> URL {
+        URL(fileURLWithPath: "/tmp/test-models/\(model.id)")
+    }
+
+    func isDownloaded(_ model: ModelDefinition) -> Bool {
+        false
+    }
+}
+
+final class TranscriptionLoaderProbe: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "TranscriptionLoaderProbe")
+    private var called = false
+
+    var wasCalled: Bool {
+        queue.sync { called }
+    }
+
+    func markCalled() {
+        queue.sync { called = true }
     }
 }
 

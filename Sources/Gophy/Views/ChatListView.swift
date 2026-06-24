@@ -122,6 +122,8 @@ struct ChatListView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .alert("Rename Chat", isPresented: Binding(
             get: { renamingChatId != nil },
             set: { if !$0 { renamingChatId = nil } }
@@ -156,6 +158,7 @@ struct ChatListView: View {
             Spacer()
         }
         .padding(.vertical, 2)
+        .listRowBackground(Color(nsColor: .windowBackgroundColor))
     }
 }
 

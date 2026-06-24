@@ -88,7 +88,8 @@ struct MeetingContainerView: View {
             logger.info("Created repositories")
 
             // Check required models
-            guard (ModelRegistry.shared.availableModels().first(where: { $0.type == .stt })) != nil else {
+            if TranscriptionModelAvailability.usesLocalSTT(),
+               TranscriptionModelAvailability.downloadedLocalSTTModel() == nil {
                 initError = "Transcription model not downloaded. Download a speech-to-text model to record meetings."
                 return
             }

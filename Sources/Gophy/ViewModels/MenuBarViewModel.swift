@@ -25,9 +25,10 @@ public final class MenuBarViewModel {
     }
 
     func start() {
-        startPolling()
-        Task { await loadUpcomingEvents() }
-        Task { await loadLastMeetingSummary() }
+        if pollTask == nil {
+            startPolling()
+        }
+        Task { await refresh() }
     }
 
     func stop() {
@@ -152,9 +153,13 @@ public final class MenuBarViewModel {
             let meetingRepo = MeetingRepository(database: db)
             let chatRepo = ChatMessageRepository(database: db)
             let meetings = try await meetingRepo.listAll(limit: 1, offset: 0)
-            guard let last = meetings.first else { return }
+            guard let last = meetings.first else {
+                clearLastMeeting()
+                return
+            }
             lastMeetingTitle = last.title
             lastMeetingDate = last.startedAt
+            lastMeetingSummary = ""
             let messages = try await chatRepo.listForMeeting(meetingId: last.id)
             if let firstSuggestion = messages.first(where: { $0.role == "assistant" }) {
                 lastMeetingSummary = firstSuggestion.content
@@ -162,6 +167,12 @@ public final class MenuBarViewModel {
         } catch {
             logger.warning("Failed to load last meeting: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func clearLastMeeting() {
+        lastMeetingTitle = ""
+        lastMeetingSummary = ""
+        lastMeetingDate = nil
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
