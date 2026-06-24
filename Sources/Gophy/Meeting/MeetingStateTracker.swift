@@ -72,7 +72,7 @@ public final class MeetingStateTracker {
                 break
             }
 
-        case .suggestion, .playbackProgress, .automation, .error:
+        case .suggestion, .audioLevel, .playbackProgress, .automation, .error:
             break
         }
     }

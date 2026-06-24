@@ -15,7 +15,7 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
             mockChunks = chunks
         }
 
-        func start() -> AsyncStream<AudioChunk> {
+        func start() async throws -> AsyncStream<AudioChunk> {
             AsyncStream { continuation in
                 self.continuation = continuation
                 Task {
@@ -77,6 +77,25 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
         XCTAssertTrue(rerouted?.usingFallback == true)
     }
 
+    func testFormatSelectionUsesActiveDeviceSampleRateOverStaleNodeFormat() {
+        let rode = AudioDevice(
+            id: 100,
+            name: "RODE NT-USB+",
+            uid: "rode",
+            sampleRate: 48_000,
+            inputChannelCount: 1
+        )
+
+        let format = MicrophoneCaptureFormatSelection.resolve(
+            activeDevice: rode,
+            nodeSampleRate: 44_100,
+            nodeChannelCount: 1
+        )
+
+        XCTAssertEqual(format?.sampleRate, 48_000)
+        XCTAssertEqual(format?.channelCount, 1)
+    }
+
     // MARK: - Tests
 
     func testStartEmitsAudioChunks() async throws {
@@ -96,7 +115,7 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
 
         await mock.setMockChunks([mockChunk1, mockChunk2])
 
-        let stream = await mock.start()
+        let stream = try await mock.start()
         var receivedChunks: [AudioChunk] = []
 
         for await chunk in stream {
@@ -125,7 +144,7 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
 
         await mock.setMockChunks([mockChunk])
 
-        let stream = await mock.start()
+        let stream = try await mock.start()
         var receivedChunk: AudioChunk?
 
         for await chunk in stream {
@@ -163,7 +182,7 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
 
         await mock.setMockChunks([mockChunk])
 
-        let stream = await mock.start()
+        let stream = try await mock.start()
         var didStreamEnd = false
 
         Task {
@@ -192,7 +211,7 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
 
         await mock.setMockChunks([mockChunk])
 
-        let stream = await mock.start()
+        let stream = try await mock.start()
         var receivedChunk: AudioChunk?
 
         for await chunk in stream {
@@ -215,7 +234,7 @@ final class MicrophoneCaptureServiceTests: XCTestCase {
         let service = MicrophoneCaptureService()
 
         // Start capture (will fail if no permission, but that's expected in CI)
-        let stream = await service.start()
+        let stream = try? await service.start()
 
         // Immediately stop to avoid permission dialogs in tests
         await service.stop()

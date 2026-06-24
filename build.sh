@@ -66,9 +66,18 @@ if [ -d ".build/xcode/Build/Products/Debug/mlx-swift_Cmlx.bundle" ]; then
 fi
 
 # Sign the app with a stable identity so macOS remembers permissions (mic, keychain) across rebuilds.
-# Uses "Gophy Development" self-signed cert if available, falls back to ad-hoc signing.
-SIGN_IDENTITY="Gophy Dev Signing"
-if security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+# Prefer an explicit identity, then a local Gophy cert, then the first Apple Development identity.
+SIGN_IDENTITY="${GOPHY_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ] && security find-identity -p codesigning 2>/dev/null | grep -q "Gophy Dev Signing"; then
+    SIGN_IDENTITY="Gophy Dev Signing"
+fi
+if [ -z "$SIGN_IDENTITY" ]; then
+    SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' \
+        | head -1)
+fi
+
+if [ -n "$SIGN_IDENTITY" ]; then
     codesign --force --deep --sign "$SIGN_IDENTITY" --entitlements Sources/Gophy/Gophy-debug.entitlements "$APP_DIR"
     echo "Signed with '$SIGN_IDENTITY' certificate (permissions persist across rebuilds)"
 else

@@ -378,7 +378,7 @@ public final class PlaybackMeetingViewModel {
             currentTime = time
             duration = dur
 
-        case .automation:
+        case .automation, .audioLevel:
             break
 
         case .error(let error):

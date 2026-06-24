@@ -88,6 +88,50 @@ final class MeetingSessionControllerTests: XCTestCase {
         XCTAssertEqual(configuredDeviceUID, "preferred-mic")
     }
 
+    func testStartFailsWhenMicrophoneCaptureCannotStart() async throws {
+        await mockMicrophoneCapture.setStartError(AudioCaptureError.permissionDenied)
+
+        do {
+            try await controller.start(title: "Test Meeting")
+            XCTFail("Expected microphone startup failure")
+        } catch AudioCaptureError.permissionDenied {
+            // Expected
+        } catch {
+            XCTFail("Expected AudioCaptureError.permissionDenied, got \(error)")
+        }
+
+        let createdMeetings = await mockMeetingRepository.createdMeetings
+        let sysStarted = await mockSystemAudioCapture.isStarted
+        XCTAssertTrue(createdMeetings.isEmpty)
+        XCTAssertFalse(sysStarted)
+        XCTAssertNil(controller.currentMeetingId)
+    }
+
+    func testAudioLevelEventsAreEmittedFromMicrophoneChunks() async throws {
+        let expectation = expectation(description: "Received microphone audio level")
+        let samples = Array(repeating: Float(0.25), count: 16000)
+        let chunk = AudioChunk(samples: samples, timestamp: 0, source: .microphone)
+        await mockMicrophoneCapture.setChunks([chunk])
+
+        let localController = controller!
+        Task { @Sendable in
+            for await event in localController.eventStream {
+                if case .audioLevel(let source, let level) = event, source == .microphone {
+                    XCTAssertGreaterThan(level, 0)
+                    expectation.fulfill()
+                    break
+                }
+            }
+        }
+
+        try await controller.start(
+            title: "Test Meeting",
+            audioConfiguration: AudioCaptureConfiguration(systemAudioEnabled: false)
+        )
+
+        await fulfillment(of: [expectation], timeout: 2.0)
+    }
+
     func testTranscriptSegmentsAppearInEventStream() async throws {
         let expectation = expectation(description: "Received transcript segment event")
 
@@ -272,6 +316,9 @@ actor MockTranscriptionPipeline: TranscriptionPipelineProtocol {
         let capturedSelf = self
         return AsyncStream { continuation in
             Task { @Sendable in
+                for await _ in mixedStream {}
+            }
+            Task { @Sendable in
                 let segments = await capturedSelf.getSegments()
                 for segment in segments {
                     continuation.yield(segment)
@@ -383,10 +430,12 @@ actor MockEmbeddingPipeline: EmbeddingPipelineProtocol {
 
 // MARK: - Mock Audio Capture Services
 
-actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
-    private var _isStarted = false
-    private var _isStopped = false
-    private var _configuredDeviceUID: String?
+    actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
+        private var _isStarted = false
+        private var _isStopped = false
+        private var _configuredDeviceUID: String?
+        private var _startError: AudioCaptureError?
+        private var _chunks: [AudioChunk] = []
 
     var isStarted: Bool {
         get async { _isStarted }
@@ -400,11 +449,23 @@ actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
         get async { _configuredDeviceUID }
     }
 
-    nonisolated func start() -> AsyncStream<AudioChunk> {
-        Task {
-            await self.setStarted()
+    func start() async throws -> AsyncStream<AudioChunk> {
+        if let startError = _startError {
+            throw startError
         }
-        return AsyncStream { _ in }
+
+        _isStarted = true
+        _isStopped = false
+        let chunks = _chunks
+        return AsyncStream { continuation in
+            guard !chunks.isEmpty else { return }
+            Task {
+                for chunk in chunks {
+                    continuation.yield(chunk)
+                }
+                continuation.finish()
+            }
+        }
     }
 
     func stop() async {
@@ -416,9 +477,12 @@ actor MockMicrophoneCaptureForMeeting: MicrophoneCaptureProtocol {
         _configuredDeviceUID = uid
     }
 
-    private func setStarted() {
-        _isStarted = true
-        _isStopped = false
+    func setStartError(_ error: AudioCaptureError?) {
+        _startError = error
+    }
+
+    func setChunks(_ chunks: [AudioChunk]) {
+        _chunks = chunks
     }
 }
 
@@ -451,4 +515,3 @@ actor MockSystemAudioCaptureForMeeting: SystemAudioCaptureProtocol {
         _isStopped = false
     }
 }
-

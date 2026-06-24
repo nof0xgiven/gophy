@@ -93,7 +93,7 @@ public final class CompactOverlayViewModel {
                 latestSuggestion = ""
             }
 
-        case .automation, .playbackProgress, .error:
+        case .automation, .audioLevel, .playbackProgress, .error:
             break
         }
     }

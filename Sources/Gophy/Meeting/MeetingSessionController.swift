@@ -151,66 +151,80 @@ public actor MeetingSessionController {
         updateStatus(.starting)
         logger.info("Status: starting")
 
-        logger.info("Switching to meeting mode...")
-        try await modeController.switchMode(.meeting)
-        logger.info("Meeting mode active")
+        do {
+            logger.info("Switching to meeting mode...")
+            try await modeController.switchMode(.meeting)
+            logger.info("Meeting mode active")
 
-        let meetingId = UUID().uuidString
-        let meeting = MeetingRecord(
-            id: meetingId,
-            title: title,
-            startedAt: Date(),
-            endedAt: nil,
-            mode: "meeting",
-            status: "active",
-            createdAt: Date(),
-            calendarEventId: calendarEventId
-        )
-        logger.info("Creating meeting record...")
-        try await meetingRepository.create(meeting)
-        currentMeetingId = meetingId
-        currentCalendarEventId = calendarEventId
-        logger.info("Meeting record created: \(meetingId, privacy: .public)")
+            let mixedStream = try await makeMixedAudioStream(using: audioConfiguration)
 
-        let mixedStream = await makeMixedAudioStream(using: audioConfiguration)
-
-        if let savedLanguage = UserDefaults.standard.string(forKey: "languagePreference"),
-           let language = AppLanguage(rawValue: savedLanguage) {
-            await transcriptionPipeline.setLanguageHint(language.isoCode)
-        } else {
-            await transcriptionPipeline.setLanguageHint(nil)
-        }
-
-        logger.info("Starting transcription pipeline...")
-        let transcriptStream = transcriptionPipeline.start(mixedStream: mixedStream)
-        logger.info("Transcription pipeline started")
-
-        let (automationTranscriptStream, automationTranscriptContinuation) =
-            AsyncStream<TranscriptSegment>.makeStream()
-
-        transcriptionTask = Task {
-            for await segment in transcriptStream {
-                await handleTranscriptSegment(segment, meetingId: meetingId)
-                automationTranscriptContinuation.yield(segment)
-            }
-            automationTranscriptContinuation.finish()
-        }
-
-        if let automationManager {
-            let automationEvents = await automationManager.activateForMeeting(
-                meetingId: meetingId,
-                transcriptStream: automationTranscriptStream
+            let meetingId = UUID().uuidString
+            let meeting = MeetingRecord(
+                id: meetingId,
+                title: title,
+                startedAt: Date(),
+                endedAt: nil,
+                mode: "meeting",
+                status: "active",
+                createdAt: Date(),
+                calendarEventId: calendarEventId
             )
-            automationTask = Task {
-                for await event in automationEvents {
-                    eventContinuation?.yield(.automation(event))
-                    await MeetingEventBroadcaster.shared.broadcast(.automation(event))
+            logger.info("Creating meeting record...")
+            try await meetingRepository.create(meeting)
+            currentMeetingId = meetingId
+            currentCalendarEventId = calendarEventId
+            logger.info("Meeting record created: \(meetingId, privacy: .public)")
+
+            if let savedLanguage = UserDefaults.standard.string(forKey: "languagePreference"),
+               let language = AppLanguage(rawValue: savedLanguage) {
+                await transcriptionPipeline.setLanguageHint(language.isoCode)
+            } else {
+                await transcriptionPipeline.setLanguageHint(nil)
+            }
+
+            logger.info("Starting transcription pipeline...")
+            let transcriptStream = transcriptionPipeline.start(mixedStream: mixedStream)
+            logger.info("Transcription pipeline started")
+
+            let (automationTranscriptStream, automationTranscriptContinuation) =
+                AsyncStream<TranscriptSegment>.makeStream()
+
+            transcriptionTask = Task {
+                for await segment in transcriptStream {
+                    await handleTranscriptSegment(segment, meetingId: meetingId)
+                    automationTranscriptContinuation.yield(segment)
+                }
+                automationTranscriptContinuation.finish()
+            }
+
+            if let automationManager {
+                let automationEvents = await automationManager.activateForMeeting(
+                    meetingId: meetingId,
+                    transcriptStream: automationTranscriptStream
+                )
+                automationTask = Task {
+                    for await event in automationEvents {
+                        eventContinuation?.yield(.automation(event))
+                        await MeetingEventBroadcaster.shared.broadcast(.automation(event))
+                    }
                 }
             }
-        }
 
-        updateStatus(.active)
-        logger.info("Meeting started successfully!")
+            updateStatus(.active)
+            logger.info("Meeting started successfully!")
+        } catch {
+            logger.error("Failed to start meeting: \(error.localizedDescription, privacy: .public)")
+            await microphoneCapture.stop()
+            await systemAudioCapture.stop()
+            await transcriptionPipeline.stop()
+            transcriptionTask?.cancel()
+            transcriptionTask = nil
+            currentMeetingId = nil
+            currentCalendarEventId = nil
+            currentAudioConfiguration = AudioCaptureConfiguration()
+            updateStatus(.idle)
+            throw error
+        }
     }
 
     public func stop() async throws {
@@ -303,7 +317,7 @@ public actor MeetingSessionController {
 
         let configuration = audioConfiguration ?? currentAudioConfiguration
         currentAudioConfiguration = configuration
-        let mixedStream = await makeMixedAudioStream(using: configuration)
+        let mixedStream = try await makeMixedAudioStream(using: configuration)
         let transcriptStream = transcriptionPipeline.start(mixedStream: mixedStream)
 
         transcriptionTask = Task {
@@ -315,10 +329,10 @@ public actor MeetingSessionController {
         updateStatus(.active)
     }
 
-    private func makeMixedAudioStream(using configuration: AudioCaptureConfiguration) async -> AsyncStream<LabeledAudioChunk> {
+    private func makeMixedAudioStream(using configuration: AudioCaptureConfiguration) async throws -> AsyncStream<LabeledAudioChunk> {
         logger.info("Starting microphone capture...")
         await microphoneCapture.setPreferredInputDevice(uid: configuration.preferredInputDeviceUID)
-        let micStream = microphoneCapture.start()
+        let micStream = try await microphoneCapture.start()
         logger.info("Microphone capture started")
 
         let systemStream: AsyncStream<AudioChunk>
@@ -340,7 +354,33 @@ public actor MeetingSessionController {
         )
         let mixedStream = audioMixer.start()
         logger.info("Audio mixer started")
-        return mixedStream
+        return streamReportingAudioLevels(from: mixedStream)
+    }
+
+    private func streamReportingAudioLevels(from mixedStream: AsyncStream<LabeledAudioChunk>) -> AsyncStream<LabeledAudioChunk> {
+        AsyncStream { continuation in
+            Task {
+                for await chunk in mixedStream {
+                    await reportAudioLevel(for: chunk)
+                    continuation.yield(chunk)
+                }
+                continuation.finish()
+            }
+        }
+    }
+
+    private func reportAudioLevel(for chunk: LabeledAudioChunk) async {
+        let source: AudioSource = chunk.speaker == "You" ? .microphone : .systemAudio
+        let level = normalizedAudioLevel(samples: chunk.samples)
+        eventContinuation?.yield(.audioLevel(source: source, level: level))
+        await MeetingEventBroadcaster.shared.broadcast(.audioLevel(source: source, level: level))
+    }
+
+    private nonisolated func normalizedAudioLevel(samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let sumOfSquares = samples.reduce(Float(0)) { $0 + ($1 * $1) }
+        let rms = sqrt(sumOfSquares / Float(samples.count))
+        return min(1, rms * 8)
     }
 
     private func handleTranscriptSegment(_ segment: TranscriptSegment, meetingId: String) async {

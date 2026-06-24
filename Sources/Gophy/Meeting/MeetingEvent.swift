@@ -13,6 +13,7 @@ public enum MeetingEvent: Sendable {
     case transcriptSegment(TranscriptSegment)
     case suggestion(String)
     case statusChange(MeetingStatus)
+    case audioLevel(source: AudioSource, level: Float)
     case playbackProgress(currentTime: TimeInterval, duration: TimeInterval)
     case automation(AutomationEvent)
     case error(Error)

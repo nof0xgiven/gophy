@@ -51,17 +51,21 @@ public final class MeetingViewModel {
 
     public func startMeeting() async {
         do {
-            meetingStartTime = Date()
-            startDurationTimer()
-            UserDefaults.standard.set(true, forKey: "isCurrentlyRecording")
             MeetingStateTracker.shared.setMeetingTitle(title)
             try await sessionController.start(
                 title: title,
                 audioConfiguration: currentAudioConfiguration()
             )
+            meetingStartTime = Date()
+            startDurationTimer()
+            UserDefaults.standard.set(true, forKey: "isCurrentlyRecording")
             MeetingStateTracker.shared.setMeetingId(sessionController.currentMeetingId)
             startAutoSuggestions()
         } catch {
+            stopDurationTimer()
+            meetingStartTime = nil
+            duration = 0
+            status = .idle
             UserDefaults.standard.set(false, forKey: "isCurrentlyRecording")
             MeetingStateTracker.shared.setMeetingId(nil)
             errorMessage = error.localizedDescription
@@ -241,6 +245,14 @@ public final class MeetingViewModel {
 
         case .statusChange(let newStatus):
             status = newStatus
+
+        case .audioLevel(let source, let level):
+            switch source {
+            case .microphone:
+                micLevel = level
+            case .systemAudio:
+                systemAudioLevel = level
+            }
 
         case .playbackProgress:
             break

@@ -8,14 +8,14 @@ private let audioLogger = Logger(subsystem: "com.gophy.app", category: "Micropho
 
 /// Protocol for audio capture to enable testability
 protocol AudioCaptureProtocol: Actor {
-    func start() -> AsyncStream<AudioChunk>
+    func start() async throws -> AsyncStream<AudioChunk>
     func stop() async
     func setInputDevice(deviceID: String) async throws
 }
 
 /// Public protocol for microphone capture to enable DI in MeetingSessionController
 public protocol MicrophoneCaptureProtocol: Sendable {
-    nonisolated func start() -> AsyncStream<AudioChunk>
+    func start() async throws -> AsyncStream<AudioChunk>
     func stop() async
     func setPreferredInputDevice(uid: String?) async
 }
@@ -42,28 +42,24 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
     }
 
     /// Start capturing audio from the microphone
-    public nonisolated func start() -> AsyncStream<AudioChunk> {
+    public func start() async throws -> AsyncStream<AudioChunk> {
         audioLogger.info("Starting microphone capture...")
-        return AsyncStream { [weak self] continuation in
-            guard let self = self else {
-                audioLogger.error("Self is nil, finishing")
-                continuation.finish()
-                return
-            }
 
-            Task {
-                do {
-                    await self.setContinuation(continuation)
-                    try await self.configureInputRouting()
-                    try await self.setupAudioEngine()
-                    try await self.startEngine()
-                    await self.startDeviceListener()
-                    audioLogger.info("Microphone capture started successfully")
-                } catch {
-                    audioLogger.error("Failed to start microphone capture: \(error.localizedDescription, privacy: .public)")
-                    continuation.finish()
-                }
-            }
+        let (stream, continuation) = AsyncStream<AudioChunk>.makeStream()
+        setContinuation(continuation)
+
+        do {
+            try await ensureMicrophonePermission()
+            try await configureInputRouting()
+            try await setupAudioEngine()
+            try await startEngine()
+            startDeviceListener()
+            audioLogger.info("Microphone capture started successfully")
+            return stream
+        } catch {
+            audioLogger.error("Failed to start microphone capture: \(error.localizedDescription, privacy: .public)")
+            cleanupAfterFailedStart()
+            throw error
         }
     }
 
@@ -86,6 +82,18 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
 
     public func setPreferredInputDevice(uid: String?) async {
         preferredInputDeviceUID = uid
+    }
+
+    private func ensureMicrophonePermission() async throws {
+        #if os(macOS)
+        audioLogger.info("Requesting microphone permission...")
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+        audioLogger.info("Microphone permission granted: \(granted, privacy: .public)")
+        guard granted else {
+            audioLogger.error("Microphone permission denied")
+            throw AudioCaptureError.permissionDenied
+        }
+        #endif
     }
 
     /// Set input device by device ID
@@ -166,19 +174,15 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
     private func setupAudioEngine() async throws {
         audioLogger.info("Setting up audio engine...")
 
-        // Request microphone permission
-        #if os(macOS)
-        audioLogger.info("Requesting microphone permission...")
-        let granted = await AVCaptureDevice.requestAccess(for: .audio)
-        audioLogger.info("Microphone permission granted: \(granted, privacy: .public)")
-        guard granted else {
-            audioLogger.error("Microphone permission denied")
-            throw AudioCaptureError.permissionDenied
-        }
-        #endif
-
         let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
+        let nodeFormat = inputNode.outputFormat(forBus: 0)
+        guard let captureFormat = MicrophoneCaptureFormatSelection.resolve(
+            activeDevice: activeRouting?.activeDevice,
+            nodeSampleRate: nodeFormat.sampleRate,
+            nodeChannelCount: nodeFormat.channelCount
+        ), let inputFormat = captureFormat.makeAVAudioFormat() else {
+            throw AudioCaptureError.formatCreationFailed
+        }
         audioLogger.info("Input format: \(inputFormat.sampleRate, privacy: .public) Hz, \(inputFormat.channelCount, privacy: .public) channels")
 
         // Create target format: 16kHz, mono, float32
@@ -238,6 +242,18 @@ public actor MicrophoneCaptureService: AudioCaptureProtocol, MicrophoneCapturePr
     private func startEngine() async throws {
         audioEngine.prepare()
         try audioEngine.start()
+    }
+
+    private func cleanupAfterFailedStart() {
+        deviceListenerTask?.cancel()
+        deviceListenerTask = nil
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        continuation?.finish()
+        continuation = nil
+        buffer.removeAll()
+        audioConverter = nil
+        activeRouting = nil
     }
 
     private func processAudioSamples(
@@ -350,5 +366,43 @@ enum AudioCaptureError: Error, LocalizedError {
         case .converterCreationFailed:
             return "Failed to create audio converter"
         }
+    }
+}
+
+struct MicrophoneCaptureFormatSelection: Equatable {
+    let sampleRate: Double
+    let channelCount: AVAudioChannelCount
+
+    static func resolve(
+        activeDevice: AudioDevice?,
+        nodeSampleRate: Double,
+        nodeChannelCount: AVAudioChannelCount
+    ) -> MicrophoneCaptureFormatSelection? {
+        if let activeDevice,
+           activeDevice.sampleRate > 0,
+           activeDevice.inputChannelCount > 0 {
+            return MicrophoneCaptureFormatSelection(
+                sampleRate: activeDevice.sampleRate,
+                channelCount: AVAudioChannelCount(activeDevice.inputChannelCount)
+            )
+        }
+
+        guard nodeSampleRate > 0, nodeChannelCount > 0 else {
+            return nil
+        }
+
+        return MicrophoneCaptureFormatSelection(
+            sampleRate: nodeSampleRate,
+            channelCount: nodeChannelCount
+        )
+    }
+
+    func makeAVAudioFormat() -> AVAudioFormat? {
+        AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: channelCount,
+            interleaved: false
+        )
     }
 }
